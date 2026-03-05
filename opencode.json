@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "spex-state": {
+      "type": "local",
+      "command": ["spex", "mcp", "serve"],
+      "enabled": true
+    }
+  }
+}

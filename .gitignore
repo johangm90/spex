@@ -1,0 +1,25 @@
+# Build output
+/target/
+*.rlib
+
+# SQLite state databases
+.spex/state.db
+.spex/*.db
+.spex/*.db-shm
+.spex/*.db-wal
+
+# Environment
+.env
+.env.local
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Temporary installer download
+/dist/
