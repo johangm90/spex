@@ -490,9 +490,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
         }
 
         "constitution_get" | "state_constitution_get" | "prd_get" | "state_prd_get" => {
-            // Read PRD.md from the project root (source of truth is the file, not the DB)
+            // Read docs/PRD.md (source of truth is the file, not the DB)
             let project_dir = detect_project_dir();
-            let prd_path = std::path::Path::new(&project_dir).join("PRD.md");
+            let prd_path = std::path::Path::new(&project_dir).join("docs").join("PRD.md");
             let (content, exists) = if prd_path.exists() {
                 (std::fs::read_to_string(&prd_path).unwrap_or_default(), true)
             } else {
@@ -859,7 +859,7 @@ fn build_tools_list() -> Value {
         },
         {
             "name": "state_prd_get",
-            "description": "Read PRD.md from the project root. Returns content, path, exists flag, and is_template flag (true if the file is still the default unfilled template).",
+            "description": "Read PRD.md from the project root (at docs/PRD.md). Returns content, path, exists flag, and is_template flag (true if the file is still the default unfilled template).",
             "inputSchema": {
                 "type": "object",
                 "properties": {}

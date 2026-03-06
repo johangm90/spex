@@ -48,11 +48,16 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
         println!("  {} README.md", "created".green());
     }
 
-    // 5. Create PRD.md in project root
-    let prd_path = dir.join("PRD.md");
+    // 5. Create docs/ directory and PRD.md
+    let docs_dir = dir.join("docs");
+    if !docs_dir.exists() {
+        std::fs::create_dir_all(&docs_dir)?;
+        println!("  {} docs/", "created".green());
+    }
+    let prd_path = docs_dir.join("PRD.md");
     if !prd_path.exists() {
         std::fs::write(&prd_path, prd_template(name))?;
-        println!("  {} PRD.md", "created".green());
+        println!("  {} docs/PRD.md", "created".green());
     }
 
     // 6. Create opencode.json with MCP config (correct OpenCode format)
@@ -79,7 +84,7 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
     println!(
         "  {} Fill in the PRD:          {}",
         "1.".dimmed(),
-        format!("cd {} && $EDITOR PRD.md", name).cyan()
+        format!("cd {} && $EDITOR docs/PRD.md", name).cyan()
     );
     println!(
         "  {} Add your first spec:      {}",
@@ -93,7 +98,7 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
     );
     println!();
     println!(
-        "  MCP config written to {}. Open OpenCode — the orchestrator will help you fill PRD.md.",
+        "  MCP config written to {}. Open OpenCode — the orchestrator will help you fill docs/PRD.md.",
         "opencode.json".cyan()
     );
     println!(
@@ -143,13 +148,18 @@ pub async fn init_project(dir: &Path) -> Result<()> {
         println!("  {} .gitignore", "created".green());
     }
 
-    // 3. Create PRD.md if missing
-    let prd_path = dir.join("PRD.md");
+    // 3. Create docs/ directory and PRD.md if missing
+    let docs_dir = dir.join("docs");
+    if !docs_dir.exists() {
+        std::fs::create_dir_all(&docs_dir)?;
+        println!("  {} docs/", "created".green());
+    }
+    let prd_path = docs_dir.join("PRD.md");
     if !prd_path.exists() {
         std::fs::write(&prd_path, prd_template(name))?;
-        println!("  {} PRD.md", "created".green());
+        println!("  {} docs/PRD.md", "created".green());
     } else {
-        println!("  {} PRD.md already exists", "skipped".dimmed());
+        println!("  {} docs/PRD.md already exists", "skipped".dimmed());
     }
 
     // 4. Merge spex-state into opencode.json (correct OpenCode format; never overwrite existing keys)
@@ -199,7 +209,7 @@ pub async fn init_project(dir: &Path) -> Result<()> {
     println!(
         "  {}  Fill in the PRD:        {}",
         "1.".dimmed(),
-        "$EDITOR PRD.md".cyan()
+        "$EDITOR docs/PRD.md".cyan()
     );
     println!(
         "  {}  Add your first spec:    {}",
@@ -208,7 +218,7 @@ pub async fn init_project(dir: &Path) -> Result<()> {
     );
     println!();
     println!(
-        "  MCP entry written to {}. Open OpenCode — the orchestrator will help you fill PRD.md.",
+        "  MCP entry written to {}. Open OpenCode — the orchestrator will help you fill docs/PRD.md.",
         "opencode.json".cyan()
     );
     println!(
@@ -229,7 +239,7 @@ pub fn mcp_entry_json() -> serde_json::Value {
     })
 }
 
-/// Default PRD template written to PRD.md on project creation.
+/// Default PRD template written to docs/PRD.md on project creation.
 pub fn prd_template(project_name: &str) -> String {
     format!(
         r#"# {project_name} — Product Requirements Document

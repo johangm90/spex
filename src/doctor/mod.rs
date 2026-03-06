@@ -77,20 +77,20 @@ fn check_state_db() -> CheckResult {
 
 fn check_prd() -> CheckResult {
     let cwd = std::env::current_dir().unwrap_or_default();
-    let prd_path = cwd.join("PRD.md");
+    let prd_path = cwd.join("docs").join("PRD.md");
     if !prd_path.exists() {
         return CheckResult {
-            name: "PRD.md".to_string(),
+            name: "docs/PRD.md".to_string(),
             status: CheckStatus::Warn,
-            message: "PRD.md not found. Run `spex init` or create PRD.md manually.".to_string(),
+            message: "docs/PRD.md not found. Run `spex init` or create docs/PRD.md manually.".to_string(),
         };
     }
     let content = match std::fs::read_to_string(&prd_path) {
         Err(e) => {
             return CheckResult {
-                name: "PRD.md".to_string(),
+                name: "docs/PRD.md".to_string(),
                 status: CheckStatus::Fail,
-                message: format!("Cannot read PRD.md: {}", e),
+                message: format!("Cannot read docs/PRD.md: {}", e),
             }
         }
         Ok(c) => c,
@@ -100,13 +100,13 @@ fn check_prd() -> CheckResult {
         || content.contains("<!-- What is explicitly out of scope?");
     if is_template {
         CheckResult {
-            name: "PRD.md".to_string(),
+            name: "docs/PRD.md".to_string(),
             status: CheckStatus::Warn,
-            message: "PRD.md contains only the default template. Fill it in with your project details.".to_string(),
+            message: "docs/PRD.md contains only the default template. Fill it in with your project details.".to_string(),
         }
     } else {
         CheckResult {
-            name: "PRD.md".to_string(),
+            name: "docs/PRD.md".to_string(),
             status: CheckStatus::Pass,
             message: format!("Found at {}", prd_path.display()),
         }
@@ -270,14 +270,16 @@ pub async fn fix_issues() -> Vec<(String, String)> {
         }
     }
 
-    // Fix 2: Create PRD.md if missing
-    let prd_path = cwd.join("PRD.md");
+    // Fix 2: Create docs/PRD.md if missing
+    let docs_dir = cwd.join("docs");
+    let prd_path = docs_dir.join("PRD.md");
     if !prd_path.exists() {
         let name = cwd.file_name().and_then(|n| n.to_str()).unwrap_or("project");
         let template = crate::scaffold::prd_template(name);
+        let _ = std::fs::create_dir_all(&docs_dir);
         match std::fs::write(&prd_path, template) {
-            Ok(_) => results.push(("PRD.md".to_string(), "Created PRD.md with default template".to_string())),
-            Err(e) => results.push(("PRD.md".to_string(), format!("Could not create PRD.md: {}", e))),
+            Ok(_) => results.push(("docs/PRD.md".to_string(), "Created docs/PRD.md with default template".to_string())),
+            Err(e) => results.push(("docs/PRD.md".to_string(), format!("Could not create docs/PRD.md: {}", e))),
         }
     }
 
