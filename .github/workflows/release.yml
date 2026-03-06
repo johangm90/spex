@@ -148,5 +148,6 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.sha256
+            install.sh
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
