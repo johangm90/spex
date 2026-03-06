@@ -3,7 +3,7 @@
 > **Status:** active  
 > **Version:** 1.0  
 > **Date:** 2026-03-06  
-> **Authors:** spex-explore analysis + spex-orchestrate synthesis
+> **Authors:** spex-orchestrate synthesis
 
 ---
 
