@@ -1,16 +1,31 @@
 #!/bin/sh
 # spex installer — macOS and Linux
+#
 # Usage:
 #   curl -fsSL https://github.com/johangm90/spex/releases/latest/download/install.sh | sh
-#   curl -fsSL https://github.com/johangm90/spex/releases/latest/download/install.sh | sh -s -- --prefix /usr/local
+#
+# Options:
+#   --prefix <dir>   Install to <dir>/bin  (default: ~/.local/bin, no sudo needed)
+#
+# Environment:
+#   SPEX_VERSION     Pin a specific version  (default: latest)
+#   SPEX_REPO        Override GitHub repo    (default: johangm90/spex)
+#
+# Examples:
+#   # No-permission-needed install (default):
+#   curl -fsSL .../install.sh | sh
+#
+#   # System-wide install (requires sudo):
+#   curl -fsSL .../install.sh | sh -s -- --prefix /usr/local
 
 set -e
 
 REPO="${SPEX_REPO:-johangm90/spex}"
 BINARY="spex"
-PREFIX="${1:-}"
+PREFIX=""
 
-# Parse --prefix argument
+# ── Parse arguments ───────────────────────────────────────────────────────────
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix=*) PREFIX="${1#--prefix=}" ;;
@@ -18,9 +33,6 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-
-PREFIX="${PREFIX:-/usr/local}"
-BIN_DIR="${PREFIX}/bin"
 
 # ── Detect platform ───────────────────────────────────────────────────────────
 
@@ -30,22 +42,16 @@ ARCH="$(uname -m)"
 case "${OS}" in
   Linux)
     case "${ARCH}" in
-      x86_64)          TARGET="x86_64-unknown-linux-gnu" ;;
-      aarch64|arm64)   TARGET="aarch64-unknown-linux-gnu" ;;
-      *)
-        echo "error: unsupported Linux architecture: ${ARCH}" >&2
-        exit 1
-        ;;
+      x86_64)        TARGET="x86_64-unknown-linux-gnu" ;;
+      aarch64|arm64) TARGET="aarch64-unknown-linux-gnu" ;;
+      *) echo "error: unsupported Linux architecture: ${ARCH}" >&2; exit 1 ;;
     esac
     ;;
   Darwin)
     case "${ARCH}" in
-      x86_64)  TARGET="x86_64-apple-darwin" ;;
-      arm64)   TARGET="aarch64-apple-darwin" ;;
-      *)
-        echo "error: unsupported macOS architecture: ${ARCH}" >&2
-        exit 1
-        ;;
+      x86_64) TARGET="x86_64-apple-darwin" ;;
+      arm64)  TARGET="aarch64-apple-darwin" ;;
+      *) echo "error: unsupported macOS architecture: ${ARCH}" >&2; exit 1 ;;
     esac
     ;;
   *)
@@ -53,6 +59,28 @@ case "${OS}" in
     exit 1
     ;;
 esac
+
+# ── Resolve install directory ─────────────────────────────────────────────────
+#
+# Priority:
+#   1. --prefix <dir> supplied by user  → <dir>/bin  (user's choice, no fallback)
+#   2. No --prefix                      → ~/.local/bin  (no sudo needed)
+#
+# System-wide installs (/usr/local/bin, /usr/bin) require the user to pass
+# --prefix explicitly; we never call sudo automatically.
+
+if [ -n "${PREFIX}" ]; then
+  BIN_DIR="${PREFIX}/bin"
+  USE_SUDO=false
+  # If the directory isn't writable, warn and let the cp fail naturally.
+  if [ ! -w "${PREFIX}" ] && [ -d "${PREFIX}" ]; then
+    echo "warning: ${PREFIX} is not writable by the current user." >&2
+    echo "         Re-run with sudo, or omit --prefix to install to ~/.local/bin" >&2
+  fi
+else
+  BIN_DIR="${HOME}/.local/bin"
+  USE_SUDO=false
+fi
 
 # ── Resolve version ───────────────────────────────────────────────────────────
 
@@ -70,7 +98,7 @@ if [ -z "${VERSION}" ]; then
   exit 1
 fi
 
-# ── Download and install ──────────────────────────────────────────────────────
+# ── Download ──────────────────────────────────────────────────────────────────
 
 ARCHIVE="spex-${VERSION}-${TARGET}.tar.gz"
 URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"
@@ -84,32 +112,44 @@ curl -fsSL "${URL}" -o "${TMPDIR}/${ARCHIVE}"
 
 echo "Verifying checksum…"
 curl -fsSL "${CHECKSUM_URL}" -o "${TMPDIR}/${ARCHIVE}.sha256"
-(cd "${TMPDIR}" && sha256sum -c "${ARCHIVE}.sha256") || \
+(cd "${TMPDIR}" && sha256sum -c "${ARCHIVE}.sha256" 2>/dev/null) || \
 (cd "${TMPDIR}" && shasum -a 256 -c "${ARCHIVE}.sha256")
+
+# ── Install ───────────────────────────────────────────────────────────────────
 
 echo "Installing to ${BIN_DIR}…"
 tar -xzf "${TMPDIR}/${ARCHIVE}" -C "${TMPDIR}"
 mkdir -p "${BIN_DIR}"
+cp "${TMPDIR}/spex-${VERSION}-${TARGET}/${BINARY}" "${BIN_DIR}/${BINARY}"
+chmod +x "${BIN_DIR}/${BINARY}"
 
-# Try direct copy; fall back to sudo
-if cp "${TMPDIR}/spex-${VERSION}-${TARGET}/${BINARY}" "${BIN_DIR}/${BINARY}" 2>/dev/null; then
-  chmod +x "${BIN_DIR}/${BINARY}"
-else
-  sudo cp "${TMPDIR}/spex-${VERSION}-${TARGET}/${BINARY}" "${BIN_DIR}/${BINARY}"
-  sudo chmod +x "${BIN_DIR}/${BINARY}"
+# ── PATH hint ─────────────────────────────────────────────────────────────────
+
+IN_PATH=false
+case ":${PATH}:" in
+  *":${BIN_DIR}:"*) IN_PATH=true ;;
+esac
+
+echo ""
+echo "✓ spex ${VERSION} installed to ${BIN_DIR}/${BINARY}"
+
+if [ "${IN_PATH}" = "false" ]; then
+  echo ""
+  echo "  Add ${BIN_DIR} to your PATH:"
+  echo ""
+
+  SHELL_NAME="$(basename "${SHELL:-sh}")"
+  case "${SHELL_NAME}" in
+    zsh)  RC_FILE="\$HOME/.zshrc" ;;
+    fish) RC_FILE="\$HOME/.config/fish/config.fish" ;;
+    *)    RC_FILE="\$HOME/.bashrc" ;;
+  esac
+
+  echo "    echo 'export PATH=\"${BIN_DIR}:\$PATH\"' >> ${RC_FILE}"
+  echo "    source ${RC_FILE}"
 fi
 
-# ── Verify ────────────────────────────────────────────────────────────────────
-
-if command -v spex >/dev/null 2>&1; then
-  INSTALLED="$(spex --version 2>/dev/null || true)"
-  echo ""
-  echo "✓ ${INSTALLED:-spex} installed at ${BIN_DIR}/${BINARY}"
-else
-  echo ""
-  echo "✓ spex ${VERSION} installed to ${BIN_DIR}/${BINARY}"
-  echo "  Make sure ${BIN_DIR} is in your PATH."
-fi
+# ── Get started ───────────────────────────────────────────────────────────────
 
 echo ""
 echo "Get started:"
