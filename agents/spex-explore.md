@@ -1,5 +1,5 @@
 ---
-description: "Codebase and domain explorer — reads code and docs to produce structured discovery reports. Never writes application code."
+description: "DEPRECATED — read-first exploration is now expected of every spex-* agent."
 mode: subagent
 temperature: 0.1
 tools:
@@ -11,4 +11,4 @@ permission:
   edit: deny
   bash: deny
 ---
-Load your skill with the `skill` tool (name: "spex-explore") before responding.
+⚠️ This agent is deprecated. Use the relevant specialist agent directly — all spex-* agents now read first before producing output.

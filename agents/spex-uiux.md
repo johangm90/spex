@@ -1,7 +1,7 @@
 ---
-description: "UI/UX designer — produces wireframes, design tokens, component specs, and accessibility audits. Upstream of spex-frontend and spex-mobile."
+description: "DEPRECATED — use spex-frontend (Design Mode) instead."
 mode: subagent
-temperature: 0.3
+temperature: 0.1
 tools:
   write: false
   edit: false
@@ -11,4 +11,4 @@ permission:
   edit: deny
   bash: deny
 ---
-Load your skill with the `skill` tool (name: "spex-uiux") before responding.
+⚠️ This agent is deprecated. Load `spex-frontend` instead — it includes Design Mode (wireframes, tokens, component specs, a11y).

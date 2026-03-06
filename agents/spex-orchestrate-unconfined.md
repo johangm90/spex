@@ -1,15 +1,14 @@
 ---
-description: "Fully autonomous delegate-only orchestrator for unattended slice execution with no human checkpoints between waves."
+description: "DEPRECATED — use spex-orchestrate with 'run unconfined' instruction instead."
 mode: primary
 temperature: 0.1
 tools:
   write: false
   edit: false
+  bash: false
 permission:
-  bash:
-    "*": allow
-    "git push": deny
-  task:
-    "*": allow
+  write: deny
+  edit: deny
+  bash: deny
 ---
-Load your skill with the `skill` tool (name: "spex-orchestrate-unconfined") before responding.
+⚠️ This agent is deprecated. Load `spex-orchestrate` instead and say "run unconfined" to activate autonomous mode.

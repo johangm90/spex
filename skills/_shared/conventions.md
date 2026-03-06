@@ -167,9 +167,9 @@ acceptance_criteria:            # Must be non-empty for status >= review
 | `api_contract`    | OpenAPI / REST / event contract             | spex-backend    |
 | `runbook`         | Operational runbook                         | spex-devops     |
 | `test_plan`       | Test strategy & test cases                  | spex-qa         |
-| `security_review` | Security & compliance assessment            | spex-security   |
-| `release_note`    | Release summary & changelog entry           | spex-release    |
-| `exploration`     | Codebase / domain exploration notes         | spex-explore    |
+| `security_review` | Security & compliance assessment            | spex-qa         |
+| `release_note`    | Release summary & changelog entry           | spex-gitops     |
+| `exploration`     | Codebase / domain exploration notes         | *(any agent)*   |
 
 Projects may extend this registry with domain-specific types (e.g. `fiscal_spec`).
 
@@ -334,8 +334,9 @@ and all gates pass.
 
 ### SliceCompleted
 
-Emitted by `spex-release` (dev flow or branch flow) after a slice reaches `done`
-status. `spex-orchestrate` emits this only if `spex-release` is not invoked.
+Emitted by `spex-gitops` (dev flow or branch flow) after a slice reaches `done`
+status. `spex-orchestrate` emits this directly if `spex-gitops` release finalisation
+is not invoked.
 
 ```json
 {
@@ -381,21 +382,21 @@ Emitted by `spex-orchestrate` when a previously paused slice is restarted.
 
 ### ReleaseGatePass
 
-Emitted by `spex-release` after a successful merge in the branch + PR flow.
+Emitted by `spex-gitops` after a successful merge in the branch + PR flow.
 
 ```json
 {
   "type": "ReleaseGatePass",
   "branch": "feat/SLICE-NNN",
   "slice": "<slice-id>",
-  "agent": "spex-release",
+  "agent": "spex-gitops",
   "timestamp": "<ISO-8601>"
 }
 ```
 
 > **Note:** `ReleaseGatePass` is only emitted when the optional full
 > branching + PR + merge release flow is requested by the human and executed
-> by `spex-release`.
+> by `spex-gitops`.
 
 ---
 
@@ -427,16 +428,18 @@ Emitted by `spex-release` after a successful merge in the branch + PR flow.
 | Human requests branch+PR | Delegates entirely to `spex-gitops` — does **not** run git itself |
 
 > `spex-orchestrate` does **not** commit files, create branches, or open PRs.
-> It is **wave-gated**: asks the human for confirmation before starting each
-> new wave and never chains waves autonomously.
+> It is **wave-gated** by default: asks the human for confirmation before starting
+> each new wave and never chains waves autonomously.
+> In **unconfined mode** (activated by telling the orchestrator "run unconfined"),
+> wave checkpoints are skipped but double gate failures still halt execution.
 
-### `spex-db` / `spex-backend` / `spex-frontend` / `spex-mobile` / `spex-ai-eng` / `spex-security` / `spex-devops`
+### `spex-db` / `spex-backend` / `spex-frontend` / `spex-mobile` / `spex-ai-eng` / `spex-devops`
 
 | Moment | Git action |
 |--------|-----------|
 | Finishes an assigned task | `git add <own source files only> && git commit -m "feat(<domain>): <description> — Refs: TASK-NNN"` |
 
-Where `<domain>` maps to: `db`, `api`, `ui`, `mobile`, `ai`, `security`, `infra` respectively.
+Where `<domain>` maps to: `db`, `api`, `ui`, `mobile`, `ai`, `infra` respectively.
 Agents commit only **source files** (code, migrations, config). Artifact documents
 (schemas, contracts, specs, reports) are stored in MCP — never committed to git.
 
@@ -458,10 +461,10 @@ the human explicitly requests them via `spex-orchestrate`.
 | Correcting a commit message | Executes `git commit --amend` or stages and commits with the corrected message |
 | Updating CHANGELOG | `git add CHANGELOG.md && git commit -m "docs(changelog): ..."` |
 
-### `spex-release`
+### `spex-gitops` (release finalisation)
 
-`spex-release` is invoked when the human requests CHANGELOG + semver tagging,
-or when the branch + PR flow is active and a merge is ready.
+When the human requests CHANGELOG + semver tagging, or when the branch + PR flow is
+active and a merge is ready, `spex-gitops` also handles release finalisation:
 
 | Moment | Git action |
 |--------|-----------|
@@ -469,7 +472,7 @@ or when the branch + PR flow is active and a merge is ready.
 | Semver tag (if requested) | `git tag -a vX.Y.Z -m "SLICE-NNN — <title>"` |
 | Merge to main (branch flow only) | `git checkout main && git merge --no-ff slice/NNN-<slug>` — if conflicts, STOP and escalate |
 
-> In **dev flow** (default), `spex-release` only handles CHANGELOG + semver tagging
+> In **dev flow** (default), `spex-gitops` only handles CHANGELOG + semver tagging
 > when the human requests it — no merge operation needed.
 
 ### Conflict Policy (branch flow only)
@@ -487,21 +490,16 @@ or when the branch + PR flow is active and a merge is ready.
 
 | Agent | Mode | Owns | Must never |
 |-------|------|------|------------|
-| `spex-architect` | `primary` | PRD (file), ADRs (files), slice specs (MCP only), bounded contexts | Write application code; self-approve slices; write slice specs to repo |
-| `spex-orchestrate` | `primary` | Decompose, delegate, gate, MCP state tracking | Write/edit code; make arch decisions; create branches/PRs; commit files |
-| `spex-product` | `subagent` | PRD refinement, user research synthesis, slice stubs (MCP draft) | Define technical architecture; approve slices; write production code; commit |
-| `spex-uiux` | `subagent` | Wireframes, design tokens, component specs, a11y audits (MCP) | Write production frontend/mobile code; approve designs unilaterally; commit |
+| `spex-architect` | `primary` | PRD (file), ADRs (files), slice specs (MCP only), bounded contexts, product discovery | Write application code; self-approve slices; write slice specs to repo |
+| `spex-orchestrate` | `primary` | Decompose, delegate, gate, MCP state tracking; unconfined autonomous mode | Write/edit code; make arch decisions; create branches/PRs; commit files |
 | `spex-backend` | `subagent` | Server-side code, API contracts (MCP), business logic | Write frontend/mobile code; commit artifact docs |
-| `spex-frontend` | `subagent` | Web UI components, client-side state, web E2E tests | Write mobile code; write backend business logic; commit artifact docs |
+| `spex-frontend` | `subagent` | Web UI components, client-side state, web E2E tests; wireframes & design tokens (Design Mode) | Write mobile code; write backend business logic; commit artifact docs |
 | `spex-mobile` | `subagent` | Mobile screens, platform APIs, native modules, app-store configs | Write web UI; write backend business logic; commit artifact docs |
 | `spex-ai-eng` | `subagent` | LLM integration, RAG pipelines, vector DBs, prompt engineering | Make product decisions; deploy infrastructure; commit artifact docs |
 | `spex-db` | `subagent` | Schema design (MCP), migration source files | Deploy databases; write application queries; commit schema docs |
 | `spex-devops` | `subagent` | CI/CD, containers, infra-as-code (source files), runbooks (MCP) | Write application business logic; commit runbook docs |
-| `spex-gitops` | `subagent` | Branch creation, PR creation (gh), commit validation, CHANGELOG (file) | Merge PRs; tag releases; push to remote; write application code; act without human request |
-| `spex-qa` | `subagent` | Test plans (MCP), test source files, gate sign-off | Write production application code; commit test plan docs |
-| `spex-security` | `subagent` | Threat modelling, vulnerability review, compliance (MCP) | Write production application code; commit security review docs |
-| `spex-release` | `subagent` | CHANGELOG (file), semver tagging, merge (branch flow only) | Push to remote; create PRs; write application code; act in dev flow without request |
-| `spex-explore` | `subagent` | Codebase exploration, domain research, discovery reports (MCP) | Make architectural decisions; write production code; modify files |
+| `spex-gitops` | `subagent` | Branch creation, PR creation (gh), commit validation, CHANGELOG (file), release finalisation (CHANGELOG + semver tag + merge) | Merge PRs unilaterally; push to remote; write application code; act without human request |
+| `spex-qa` | `subagent` | Test plans (MCP), test source files, gate sign-off, security review & threat modelling (Security Review Mode) | Write production application code; commit test plan or security review docs |
 
 ---
 

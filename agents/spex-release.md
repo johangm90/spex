@@ -1,11 +1,14 @@
 ---
-description: "Archiver and release agent — finalises completed slices, writes release notes, and tags versions. Never pushes to remote."
+description: "DEPRECATED — use spex-gitops (Release Finalisation Flow) instead."
 mode: subagent
 temperature: 0.1
+tools:
+  write: false
+  edit: false
+  bash: false
 permission:
-  bash:
-    "*": allow
-    "git push": deny
-    "git push --force": deny
+  write: deny
+  edit: deny
+  bash: deny
 ---
-Load your skill with the `skill` tool (name: "spex-release") before responding.
+⚠️ This agent is deprecated. Load `spex-gitops` instead — it includes the Release Finalisation Flow.
