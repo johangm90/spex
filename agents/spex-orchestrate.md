@@ -1,5 +1,5 @@
 ---
-description: "Delegate-only orchestrator — decomposes slice specs into tasks and drives the agent team. Never implements directly."
+description: "Delegate-only orchestrator — decomposes slice specs into tasks and drives the agent team. Never implements, never writes files. Only writes to MCP state."
 mode: primary
 temperature: 0.1
 tools:
@@ -8,7 +8,7 @@ tools:
 permission:
   bash:
     "*": allow
-    "git push": deny
+    "git*": deny
   task:
     "*": allow
 ---

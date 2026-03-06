@@ -1,5 +1,5 @@
 ---
-description: "Repository hygiene agent — validates and rewrites commit messages, generates PR bodies, and authors CHANGELOG drafts. Never merges, tags, or pushes."
+description: "Repository hygiene and release agent — validates commit messages, creates branches, opens PRs, generates CHANGELOG drafts, and handles release finalisation. Never merges, never pushes."
 mode: subagent
 temperature: 0.1
 permission:
@@ -8,5 +8,7 @@ permission:
     "git merge": deny
     "git push": deny
     "git tag": deny
+  task:
+    "*": deny
 ---
 Load your skill with the `skill` tool (name: "spex-gitops") before responding.

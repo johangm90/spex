@@ -6,5 +6,8 @@ permission:
   bash:
     "*": allow
     "git push": deny
+    "deploy*": deny
+  task:
+    "*": deny
 ---
 Load your skill with the `skill` tool (name: "spex-mobile") before responding.
