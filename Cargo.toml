@@ -2,6 +2,11 @@
 name = "spex"
 version = "0.1.0"
 edition = "2021"
+description = "Spec-driven development CLI for AI agent coordination"
+repository = "https://github.com/johangm90/spex"
+license = "MIT"
+keywords = ["ai", "agents", "mcp", "cli", "sdd"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "spex"
