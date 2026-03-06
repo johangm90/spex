@@ -235,7 +235,7 @@ delegates fully to `spex-gitops`:
    slice ID, commit range, and context.
 3. `spex-gitops` creates the branch, ensures all commits are on it, and opens the
    PR using `gh pr create`.
-4. `spex-release` is **not** invoked for merge in dev flow — the human merges when ready.
+4. No release agent is invoked for merge in dev flow — the human merges when ready.
 
 ### Branch Conventions (when branching is requested)
 
@@ -430,8 +430,6 @@ Emitted by `spex-gitops` after a successful merge in the branch + PR flow.
 > `spex-orchestrate` does **not** commit files, create branches, or open PRs.
 > It is **wave-gated** by default: asks the human for confirmation before starting
 > each new wave and never chains waves autonomously.
-> In **unconfined mode** (activated by telling the orchestrator "run unconfined"),
-> wave checkpoints are skipped but double gate failures still halt execution.
 
 ### `spex-db` / `spex-backend` / `spex-frontend` / `spex-mobile` / `spex-ai-eng` / `spex-devops`
 
@@ -491,7 +489,7 @@ active and a merge is ready, `spex-gitops` also handles release finalisation:
 | Agent | Mode | Owns | Must never |
 |-------|------|------|------------|
 | `spex-architect` | `primary` | PRD (file), ADRs (files), slice specs (MCP only), bounded contexts, product discovery | Write application code; self-approve slices; write slice specs to repo |
-| `spex-orchestrate` | `primary` | Decompose, delegate, gate, MCP state tracking; unconfined autonomous mode | Write/edit code; make arch decisions; create branches/PRs; commit files |
+| `spex-orchestrate` | `primary` | Decompose, delegate, gate, MCP state tracking | Write/edit code; make arch decisions; create branches/PRs; commit files |
 | `spex-backend` | `subagent` | Server-side code, API contracts (MCP), business logic | Write frontend/mobile code; commit artifact docs |
 | `spex-frontend` | `subagent` | Web UI components, client-side state, web E2E tests; wireframes & design tokens (Design Mode) | Write mobile code; write backend business logic; commit artifact docs |
 | `spex-mobile` | `subagent` | Mobile screens, platform APIs, native modules, app-store configs | Write web UI; write backend business logic; commit artifact docs |
