@@ -28,7 +28,13 @@
 curl -fsSL https://github.com/johangm90/spex/releases/latest/download/install.sh | sh
 ```
 
-Supports: macOS Apple Silicon · macOS Intel · Linux x86\_64 · Linux ARM64
+Installs to `~/.local/bin` — no `sudo` required. Supports: macOS Apple Silicon · macOS Intel · Linux x86\_64 · Linux ARM64
+
+For a system-wide install:
+
+```sh
+curl -fsSL https://github.com/johangm90/spex/releases/latest/download/install.sh | sh -s -- --prefix /usr/local
+```
 
 ### From source
 
