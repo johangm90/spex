@@ -49,7 +49,7 @@ The core ideas:
 
 2. **Agents share state via MCP.** `spex` runs an embedded **MCP (Model Context Protocol)** JSON-RPC server over stdio. OpenCode agents call its tools to read and write specs, tasks, events, memory, and artifacts — all stored in a local SQLite database at `.spex/state.db`.
 
-3. **Skills are bundled and installed.** `spex` ships 16 specialised AI agent skill files (`SKILL.md`) and agent prompt files for the full `spex-*` agent team. One command installs them into `~/.config/opencode/`.
+3. **Skills are bundled and installed.** `spex` ships 10 specialised AI agent skill files (`SKILL.md`) and agent prompt files for the full `spex-*` agent team. One command installs them into `~/.config/opencode/`.
 
 ### The workflow at a glance
 
@@ -526,8 +526,8 @@ spex skill install --all
 ```
 
 Installs to:
-- `~/.config/opencode/skills/spex-*/SKILL.md` — skill instruction files (16 agents)
-- `~/.config/opencode/agents/spex-*.md` — agent prompt files (16 agents)
+- `~/.config/opencode/skills/spex-*/SKILL.md` — skill instruction files (10 agents)
+- `~/.config/opencode/agents/spex-*.md` — agent prompt files (10 agents)
 - `~/.config/opencode/skills/_shared/conventions.md` — shared agent conventions
 
 All files are **embedded in the `spex` binary** at compile time via `include_dir!` — no internet access required.
@@ -618,19 +618,13 @@ Exits with code `1` if any check fails.
 │  spex-orchestrate  ──► decomposes specs into tasks                    │
 │  spex-architect    ──► defines ADRs and bounded contexts              │
 │  spex-backend      ──► implements server-side code                    │
-│  spex-frontend     ──► implements web UI                              │
+│  spex-frontend     ──► implements web UI and design specs             │
 │  spex-qa           ──► writes tests and verifies acceptance criteria  │
 │  spex-db           ──► designs schemas and migrations                 │
 │  spex-devops       ──► manages CI/CD and infrastructure               │
-│  spex-security     ──► reviews code and config for vulnerabilities    │
-│  spex-release      ──► finalises slices and produces release notes    │
 │  spex-gitops       ──► manages commits, branches, and PRs             │
-│  spex-explore      ──► discovers and maps the codebase                │
-│  spex-product      ──► refines PRDs and user stories                  │
-│  spex-uiux         ──► produces wireframes and design specs           │
 │  spex-mobile       ──► builds mobile apps                             │
 │  spex-ai-eng       ──► integrates LLMs and AI features                │
-│  spex-orchestrate-unconfined  ──► fully automated orchestration       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -684,8 +678,7 @@ spex/
 │   ├── _shared/
 │   │   └── conventions.md
 │   └── spex-{architect,backend,frontend,mobile,db,devops,
-│              security,qa,release,gitops,explore,product,
-│              uiux,ai-eng,orchestrate,orchestrate-unconfined}/
+│              qa,gitops,ai-eng,orchestrate}/
 │       └── SKILL.md
 ├── agents/                         # Bundled agent prompt .md files
 │   └── spex-*.md
@@ -839,25 +832,19 @@ Returns a JSON object with:
 
 ## Bundled Agent Skills
 
-All 16 skills are `spex-*` prefixed, embedded in the binary, and installed via `spex skill install --all`.
+All 10 skills are `spex-*` prefixed, embedded in the binary, and installed via `spex skill install --all`.
 
 | Agent | Specialisation |
 |---|---|
-| `spex-architect` | Bounded contexts, slice specs, Architecture Decision Records |
+| `spex-architect` | Bounded contexts, slice specs, Architecture Decision Records; includes Product Discovery mode |
 | `spex-orchestrate` | Spec decomposition, task delegation, agent team coordination |
-| `spex-orchestrate-unconfined` | Fully automated orchestration (no human checkpoints) |
 | `spex-backend` | Server-side implementation, APIs, business logic |
-| `spex-frontend` | Web UI implementation (React, Vue, etc.) |
+| `spex-frontend` | Web UI implementation (React, Vue, etc.); includes design tokens and wireframes |
 | `spex-mobile` | React Native / Flutter apps, native modules, push notifications |
 | `spex-db` | Schema design, ERDs, migration strategies |
 | `spex-devops` | Containers, CI/CD pipelines, infrastructure runbooks |
-| `spex-security` | Security review, compliance, API and config audits |
-| `spex-qa` | Test plans, verification checklists, spec promotion gates |
-| `spex-release` | Slice finalisation, release artifacts, versioning |
-| `spex-gitops` | Conventional commits, branch policy, PRs, CHANGELOG entries |
-| `spex-explore` | Codebase discovery, domain mapping, structured exploration reports |
-| `spex-product` | PRDs, user stories, jobs-to-be-done, draft slice stubs |
-| `spex-uiux` | Wireframes, design tokens, component specs, accessibility audits |
+| `spex-qa` | Test plans, verification checklists, spec promotion gates; includes security review |
+| `spex-gitops` | Conventional commits, branch policy, PRs, CHANGELOG entries; includes release finalisation |
 | `spex-ai-eng` | LLM integration, RAG pipelines, vector DBs, prompt engineering |
 
 Each skill reads the project Constitution via `state_constitution_get` and calls `state_snapshot` on startup to orient itself within the current project context.
