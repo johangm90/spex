@@ -966,8 +966,8 @@ fn detect_config_source(project_dir: &str) -> &'static str {
         return "local-opencode.json";
     }
 
-    if let Some(config_dir) = dirs::config_dir() {
-        let global_path = config_dir.join("opencode").join("config.json");
+    if let Some(opencode_dir) = crate::cli::util::opencode_config_dir() {
+        let global_path = opencode_dir.join("config.json");
         if global_path.exists() {
             return "global-opencode.json";
         }

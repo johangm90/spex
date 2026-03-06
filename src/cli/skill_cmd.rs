@@ -12,10 +12,10 @@ pub async fn cmd_skill_install(all: bool) -> Result<()> {
         return Ok(());
     }
 
-    let config_dir =
-        dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
-    let skills_dir = config_dir.join("opencode").join("skills");
-    let agents_dir = config_dir.join("opencode").join("agents");
+    let opencode_dir = crate::cli::util::opencode_config_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+    let skills_dir = opencode_dir.join("skills");
+    let agents_dir = opencode_dir.join("agents");
 
     std::fs::create_dir_all(&skills_dir)?;
     std::fs::create_dir_all(&agents_dir)?;
@@ -40,9 +40,9 @@ pub async fn cmd_skill_install(all: bool) -> Result<()> {
 }
 
 pub fn cmd_skill_list() -> Result<()> {
-    let config_dir =
-        dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
-    let skills_dir = config_dir.join("opencode").join("skills");
+    let opencode_dir = crate::cli::util::opencode_config_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+    let skills_dir = opencode_dir.join("skills");
 
     if !skills_dir.exists() {
         println!(
@@ -74,10 +74,10 @@ pub async fn cmd_setup(global: bool) -> Result<()> {
     println!();
 
     // Step 1: Install bundled skills and agents
-    let config_dir =
-        dirs::config_dir().ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?;
-    let skills_dir = config_dir.join("opencode").join("skills");
-    let agents_dir = config_dir.join("opencode").join("agents");
+    let opencode_dir = crate::cli::util::opencode_config_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+    let skills_dir = opencode_dir.join("skills");
+    let agents_dir = opencode_dir.join("agents");
 
     std::fs::create_dir_all(&skills_dir)?;
     std::fs::create_dir_all(&agents_dir)?;

@@ -14,9 +14,8 @@ pub async fn cmd_mcp_serve(pool: SqlitePool) -> Result<()> {
 
 pub fn cmd_mcp_setup(global: bool) -> Result<()> {
     let path = if global {
-        let config_dir =
-            dirs::config_dir().ok_or_else(|| anyhow!("Could not find config directory"))?;
-        let opencode_dir = config_dir.join("opencode");
+        let opencode_dir = crate::cli::util::opencode_config_dir()
+            .ok_or_else(|| anyhow!("Could not find home directory"))?;
         std::fs::create_dir_all(&opencode_dir)?;
         opencode_dir.join("config.json")
     } else {

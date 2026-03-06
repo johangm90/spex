@@ -115,8 +115,9 @@ fn check_prd() -> CheckResult {
 }
 
 fn check_skills_dir() -> CheckResult {
-    let config_dir = dirs::config_dir().unwrap_or_default();
-    let skills_dir = config_dir.join("opencode").join("skills");
+    let skills_dir = crate::cli::util::opencode_config_dir()
+        .unwrap_or_default()
+        .join("skills");
     if skills_dir.exists() {
         CheckResult {
             name: "Skills dir".to_string(),
@@ -136,8 +137,9 @@ fn check_skills_dir() -> CheckResult {
 }
 
 fn check_skills_installed() -> CheckResult {
-    let config_dir = dirs::config_dir().unwrap_or_default();
-    let skills_dir = config_dir.join("opencode").join("skills");
+    let skills_dir = crate::cli::util::opencode_config_dir()
+        .unwrap_or_default()
+        .join("skills");
     match crate::skills_mgr::list_installed_skills(&skills_dir) {
         Err(e) => CheckResult {
             name: "Skills installed".to_string(),
@@ -302,8 +304,9 @@ pub async fn fix_issues() -> Vec<(String, String)> {
     }
 
     // Fix 3: Install skills if missing
-    let config_dir = dirs::config_dir().unwrap_or_default();
-    let skills_dir = config_dir.join("opencode").join("skills");
+    let skills_dir = crate::cli::util::opencode_config_dir()
+        .unwrap_or_default()
+        .join("skills");
     if !skills_dir.exists()
         || crate::skills_mgr::list_installed_skills(&skills_dir)
             .map(|s| s.is_empty())
