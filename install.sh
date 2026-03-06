@@ -1,12 +1,12 @@
 #!/bin/sh
 # spex installer — macOS and Linux
 # Usage:
-#   curl -fsSL https://github.com/OWNER/spex/releases/latest/download/install.sh | sh
-#   curl -fsSL https://github.com/OWNER/spex/releases/latest/download/install.sh | sh -s -- --prefix /usr/local
+#   curl -fsSL https://github.com/johangm90/spex/releases/latest/download/install.sh | sh
+#   curl -fsSL https://github.com/johangm90/spex/releases/latest/download/install.sh | sh -s -- --prefix /usr/local
 
 set -e
 
-REPO="${SPEX_REPO:-OWNER/spex}"
+REPO="${SPEX_REPO:-johangm90/spex}"
 BINARY="spex"
 PREFIX="${1:-}"
 

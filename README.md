@@ -3,7 +3,7 @@
 > **Spec-Driven Development for AI-assisted teams.**  
 > Define specs, coordinate agents, track progress — all from your terminal.
 
-[![Build](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)](https://github.com/yourorg/spex)
+[![Build](https://img.shields.io/badge/build-passing-brightgreen?style=flat-square)](https://github.com/johangm90/spex)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue?style=flat-square)](Cargo.toml)
 [![License](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?style=flat-square)](https://www.rust-lang.org)
@@ -80,7 +80,7 @@ You write a Constitution (project PRD)
 ### From source (recommended)
 
 ```bash
-git clone https://github.com/yourorg/spex.git
+git clone https://github.com/johangm90/spex.git
 cd spex
 cargo install --path .
 ```
@@ -93,7 +93,7 @@ spex --version
 
 ### Pre-built binary *(coming soon)*
 
-Pre-built binaries for Linux x86\_64, macOS arm64, and macOS x86\_64 will be available on the [Releases](https://github.com/yourorg/spex/releases) page.
+Pre-built binaries for Linux x86\_64, macOS arm64, and macOS x86\_64 will be available on the [Releases](https://github.com/johangm90/spex/releases) page.
 
 ---
 
@@ -872,7 +872,7 @@ Each skill reads the project Constitution via `state_constitution_get` and calls
 ### Setup
 
 ```bash
-git clone https://github.com/yourorg/spex.git
+git clone https://github.com/johangm90/spex.git
 cd spex
 cargo build
 cargo test

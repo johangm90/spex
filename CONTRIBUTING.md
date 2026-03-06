@@ -19,7 +19,7 @@ Thank you for your interest in contributing! This guide covers the development w
 **Prerequisites:** Rust 1.75+, `cargo`, `git`.
 
 ```sh
-git clone https://github.com/OWNER/spex   # replace OWNER with actual handle
+git clone https://github.com/johangm90/spex
 cd spex
 cargo build
 cargo run -- --help
