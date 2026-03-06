@@ -40,7 +40,7 @@ Before any other action, verify the shared persistent memory is available:
 |-------|--------|----------|
 | Architecture overview | Project vision artifact | yes |
 | Slice infrastructure needs | Slice spec + backend/frontend specs | yes |
-| Security requirements | `spex-security` artifact | yes |
+| Security requirements | `spex-qa` security review artifact or human input | yes |
 
 ## Process
 

@@ -67,31 +67,16 @@ After confirming MCP is available and `project_dir` matches, **always** check th
 
 1. Call `state_prd_get` (or `state_constitution_get`) via MCP.
 2. Evaluate the response:
-   - If `exists` is `false` → the project has no PRD file at all.
-   - If `is_template` is `true` → the file exists but contains only placeholder text.
+   - If `exists` is `false` → `docs/PRD.md` does not exist.
+   - If `is_template` is `true` → `docs/PRD.md` exists but contains only placeholder text.
    - If `is_template` is `false` → the PRD is filled; read `content` silently as context.
-3. **If the PRD is missing or template-only**, enter collaborative fill mode:
-   - Open with: _"👋 I see `PRD.md` hasn't been filled out yet. A clear PRD makes every spec I orchestrate much more accurate. Can we fill it in together? It'll only take a few minutes."_
-   - Walk through each section **one at a time**, waiting for the user's answer before moving on:
-     1. **Vision** — _"What is this project? What problem does it solve, and who benefits?"_
-     2. **Goals** — _"What are the top 3 measurable goals for this project?"_
-     3. **Non-Goals** — _"What is explicitly out of scope? What won't you build?"_
-     4. **Users** — _"Who are the target users or personas?"_
-     5. **Tech Stack** — _"What languages, frameworks, databases, or infrastructure will you use?"_
-     6. **Architecture Principles** — _"Any key constraints or decisions every spec must honour?"_
-     7. **Acceptance Standards** — _"What defines 'done' for any spec in this project?"_
-     8. **Open Questions** — _"Any unresolved decisions that need answers before or during development?"_
-   - After collecting all answers, write the filled PRD.md to disk using the bash tool:
-     ```
-     cat > PRD.md << 'EOF'
-     # <project name> — Product Requirements Document
-     ...filled content...
-     EOF
-     ```
-   - Confirm: _"✅ PRD.md saved. I'll use this as the north star for all orchestration decisions."_
+3. **If the PRD is missing or template-only**, stop and delegate to `spex-architect`:
+   - Inform the human: _"📋 `docs/PRD.md` hasn't been filled out yet. I need it before I can orchestrate anything. Please ask `@spex-architect` to create it — it will walk you through the process interactively."_
+   - **Do not** attempt to collect PRD content or write files yourself.
+   - **Wait** for the human to confirm the PRD is ready before proceeding.
 4. **If the PRD is filled** → acknowledge it briefly: _"📋 PRD loaded. [one-sentence summary of the project vision]."_ Then proceed to the normal startup flow.
 
-> **Rule:** Never start orchestrating slices without a filled PRD. Every spec decomposition must be grounded in the PRD's goals, tech stack, and acceptance standards.
+> **Rule:** Never start orchestrating slices without a filled `docs/PRD.md`. Writing `docs/PRD.md` is `spex-architect`'s responsibility — `spex-orchestrate` only reads it.
 
 ## State Protocol
 
@@ -207,7 +192,7 @@ Invoke when:
    - `spex-gitops` runs `git checkout -b` and `gh pr create` directly
    - `spex-orchestrate` does **not** run any git commands itself
 8. **Archive** — update slice status to `done` via `state_slice_update`;
-   delegate CHANGELOG and `SliceCompleted` event to `spex-release` (or emit directly if `spex-release` is not invoked)
+   delegate CHANGELOG and `SliceCompleted` event to `spex-gitops` (or emit `SliceCompleted` directly if branching is not requested)
 
 ### Task Prompt Format
 
@@ -236,7 +221,7 @@ labelled `blocked` and halt delegation on that task until a human resolves it.
 | MCP task status | via `state_task_update` | Updated as tasks complete |
 | TaskHandedOff events | via `state_event_emit` | One event emitted per delegation |
 | SlicePaused / SliceResumed | via `state_event_emit` | Lifecycle transition events |
-| SliceCompleted event | via `state_event_emit` | Emitted when slice reaches `done` (unless delegated to spex-release) |
+| SliceCompleted event | via `state_event_emit` | Emitted when slice reaches `done` (unless delegated to spex-gitops) |
 
 ### TaskHandedOff Event
 
@@ -301,7 +286,7 @@ See `_shared/conventions.md` § Git Protocol per Agent.
 - Run any git command — git is `spex-gitops`'s domain
 - Execute `git push` — remote push is the human's decision
 - Retry indefinitely — escalate to a `blocked` issue after two consecutive gate failures
-- Write files to the project repository — the only repo files are source code, PRD, and ADRs
+- Write any file to the project repository — all file writes are delegated to specialist agents
 - Write to `ai/state.json`, `ai/events.jsonl`, `docs/orchestration/`, or `docs/slices/`
 - Auto-advance to the next wave without explicit human confirmation
 - Auto-resume a paused slice without explicit human confirmation

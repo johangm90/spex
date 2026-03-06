@@ -28,7 +28,7 @@ Invoke when:
 | Slice spec | MCP `memory_get(agent="spex-architect", key="slice_SLICE-NNN")` (approved) | yes |
 | Task assignment | MCP `state_task_get` (assigned by `spex-orchestrate`) | yes |
 | API contract | `memory_get(key="artifact_PROJ-API-NNN")` (approved) | yes |
-| UX wireframes | `memory_get(agent="spex-uiux", key="artifact_A0NN-N")` or human input | if available |
+| UX wireframes | `memory_get(agent="spex-frontend", key="artifact_A0NN-N")` or human input | if available |
 | Sync/offline spec | Approved sync or offline strategy artifact | if applicable |
 
 ## Process

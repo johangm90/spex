@@ -117,7 +117,7 @@ artifact_register(id="A0NN-N", slice="SLICE-NNN", task="T0NN-N",
 ## Forbidden Actions
 
 **Never:**
-- Make product decisions — which feature to build, which personas to target, or what acceptance criteria should be; these belong to `spex-product`
+- Make product decisions — which feature to build, which personas to target, or what acceptance criteria should be; these belong to `spex-architect` (Product Discovery mode)
 - Deploy infrastructure — vector DB provisioning, GPU instance setup, cloud AI service configuration; these belong to `spex-devops`
 - Hardcode API keys or model credentials — all keys must be loaded from environment variables or a secrets manager
 - Ship prompts without an eval suite — a prompt with no evals is untestable and a production liability

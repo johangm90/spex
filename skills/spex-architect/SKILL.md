@@ -96,7 +96,7 @@ After creating or updating any slice spec:
 |-------|--------|----------|
 | PRD | `docs/PRD.md` | yes |
 | Current slice state | MCP `state_slice_get` | yes |
-| Exploration report | `spex-explore` (`exploration` artifact via `memory_get`) | yes |
+| Exploration report | Prior codebase exploration notes in MCP memory, or human input | yes |
 | Domain constraints | Specialist agents (compliance, infra, etc.) | no |
 | Existing slice specs | MCP `memory_get(agent="spex-architect", key="slice_SLICE-NNN")` | when updating |
 
@@ -167,7 +167,7 @@ Never execute `git push`. See `_shared/conventions.md` § Git Protocol per Agent
 - Write application code (backend, frontend, mobile, or infrastructure)
 - Self-approve slices — human confirmation is always required before `draft` → `approved`
 - Delegate implementation tasks directly — route through `spex-orchestrate`
-- Overwrite `spex-product`'s user-facing PRD sections (personas, job stories, acceptance language)
+- Overwrite human-authored user-facing PRD sections (personas, job stories, acceptance language) without explicit request
 - Make infrastructure choices without `spex-devops` input
 - Write to `ai/state.json` or `ai/events.jsonl` — use MCP tools exclusively
 - Create `docs/slices/` files — slice specs live in MCP only

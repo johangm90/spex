@@ -16,7 +16,7 @@ Swift (iOS) and Kotlin (Android) are used for native modules only.** Web UI is
 covers the full mobile implementation lifecycle: screens and navigation, API
 integration, platform-specific APIs (permissions, deep linking, push notifications),
 offline-first data patterns, native module bindings, unit and E2E tests, and app
-store configuration. It coordinates upstream with `spex-uiux` (component specs and
+store configuration. It coordinates upstream with `spex-frontend` (component specs and
 design tokens) and downstream with `spex-backend` (API contracts).
 
 ## When to Use
@@ -49,15 +49,15 @@ Before any other action, verify the shared persistent memory is available:
 |-------|-------------|
 | Slice spec | MCP `memory_get(agent="spex-architect", key="slice_SLICE-NNN")` (approved) |
 | API contract | `memory_get(key="artifact_PROJ-API-NNN")` from `spex-backend` |
-| `spex-uiux` component spec | `memory_get(agent="spex-uiux", key="artifact_A0NN-N")` — component props, states, variants, design tokens (if available) |
+| `spex-frontend` component spec | `memory_get(agent="spex-frontend", key="artifact_A0NN-N")` — component props, states, variants, design tokens (if available) |
 | Platform target | iOS, Android, or both |
 | Environment config | API base URL, push notification keys, deep link scheme |
 
 ## Process
 
-1. **Read** the slice spec, API contract, and `spex-uiux` component spec before
+1. **Read** the slice spec, API contract, and `spex-frontend` component spec before
    writing any code
-2. **Scaffold screens** — implement screens/components per the `spex-uiux` spec;
+2. **Scaffold screens** — implement screens/components per the `spex-frontend` spec;
    wire navigation (React Navigation or Flutter Navigator)
 3. **Wire to API** — integrate API endpoints from the `spex-backend` contract;
    handle loading, error, and empty states
@@ -145,7 +145,7 @@ artifact_register(id="A0NN-N", slice="SLICE-NNN", task="T0NN-N",
 5. **Test on both platforms** — if the target is both iOS and Android, E2E tests
    must cover both platforms.
 6. **No direct store submission** — always flag store submission as a human gate.
-7. **Coordinate with `spex-uiux`** — consume the component spec and design tokens;
+7. **Coordinate with `spex-frontend`** — consume the component spec and design tokens;
    do not invent visual design independently.
 8. **Reference `_shared/conventions.md`** for artifact envelope format and commit
    conventions.

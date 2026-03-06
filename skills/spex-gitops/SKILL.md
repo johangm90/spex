@@ -17,9 +17,7 @@ messages, enforces branch naming policy, executes branch creation (`git
 checkout -b`), opens PRs (`gh pr create`), and generates CHANGELOG draft
 entries.
 
-**Boundary with `spex-release`:** `spex-gitops` owns everything **before** the
-merge (commit messages, branch names, PR descriptions, CHANGELOG drafts);
-`spex-release` owns the final merge, semver tag, and release publication.
+`spex-gitops` owns commit messages, branch names, PR descriptions, CHANGELOG drafts, and release finalisation (semver tagging, release notes). The human triggers the actual merge and remote push.
 
 ## MCP State Check (mandatory at startup)
 
@@ -58,8 +56,7 @@ Invoke `spex-gitops` when:
   Conventional Commits specification before committing
 - A PR needs a structured, scannable description (summary, change list, testing
   notes, checklist) before it is submitted
-- A CHANGELOG draft entry is needed for a completed slice, ready for `spex-release`
-  to incorporate
+- A CHANGELOG draft entry is needed for a completed slice
 - A branch name violates the project's naming policy and needs to be corrected
 - Pre-commit hook configuration needs to be set up to enforce commit message
   format automatically
@@ -110,7 +107,7 @@ Invoke `spex-gitops` when:
 | Commit message (validated/rewritten) | Plain text | Conforming Conventional Commit; executed via `git commit --amend` if needed |
 | Branch | git branch | Created via `git checkout -b`; only when human-requested |
 | PR | GitHub PR | Opened via `gh pr create`; only when human-requested |
-| CHANGELOG draft section | Markdown | Keep-a-Changelog format; ready for `spex-release` to incorporate |
+| CHANGELOG draft section | Markdown | Keep-a-Changelog format |
 | Branch naming validation report | Prose | Valid / invalid + suggested correction |
 
 ## Git Protocol
@@ -128,9 +125,9 @@ Invoke `spex-gitops` when:
 
 ## Forbidden Actions
 
-- **NEVER run `git merge`** — merging belongs to `spex-release` only
+- **NEVER run `git merge`** — merging is a human gate
 - **NEVER run `git push`** — remote operations are the human's decision
-- **NEVER run `git tag`** — semver tagging belongs to `spex-release` only
+- **NEVER run `git tag`** — semver tagging requires explicit human instruction
 - **NEVER create branches or PRs without human request** — branching and PRs are
   strictly opt-in; act only when `spex-orchestrate` delegates with human confirmation
 - **NEVER modify application code** — `spex-gitops` operates only on git metadata
@@ -151,6 +148,4 @@ Invoke `spex-gitops` when:
    policy violation.
 6. **Reference `_shared/conventions.md`** for the canonical branch naming table,
    commit type definitions, and PR checklist.
-7. **The `spex-gitops` / `spex-release` boundary is absolute** — if an operation
-   involves merging, tagging, or pushing to a remote, hand off to `spex-release`;
-   do not attempt to perform it.
+7. **Merging, tagging, and remote push are human gates** — if an operation involves merging to `main`, semver tagging, or pushing to a remote, stop and ask the human; do not attempt to perform it.
