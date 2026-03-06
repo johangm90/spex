@@ -31,6 +31,7 @@
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [MCP Tools Reference](#mcp-tools-reference)
+  - [Memory Tools](#memory-tools)
 - [Bundled Agent Skills](#bundled-agent-skills)
 - [Database Schema](#database-schema)
 - [Contributing / Development](#contributing--development)
@@ -722,14 +723,117 @@ All tools are invoked via `tools/call` in the MCP JSON-RPC protocol. The `state_
 | `state_task_update` | Update task status or output artifact | `id` | `status`, `output_artifact` |
 | `state_event_emit` | Emit a domain event to the append-only log | `type` | `spec`, `agent`, `payload` |
 | `state_event_query` | Query the event log with filters | — | `type`, `spec`, `agent`, `limit`, `since` |
-| `memory_set` | Store a KV entry in an agent's scratchpad | `agent`, `key`, `value` | `spec` |
-| `memory_get` | Get a KV entry or all entries for an agent | `agent` | `key`, `spec` |
+| `memory_set` | Store or update a value in agent memory | `agent`, `key`, `value` | `spec`, `type`, `ttl_seconds` |
+| `memory_get` | Get a value or all entries for an agent | `agent` | `key`, `spec` |
+| `memory_search` | Full-text search across memory entries (FTS5) | `agent`, `query` | `spec`, `type`, `limit` |
+| `memory_delete` | Soft-delete a memory entry | `agent`, `key` | `spec` |
+| `memory_context` | Return most recently accessed entries for session recovery | `agent` | `spec`, `limit` |
+| `memory_stats` | Return aggregate statistics for agent memory | `agent` | `spec` |
 | `artifact_register` | Register an output artifact | `id`, `spec`, `agent`, `type` | `task`, `path`, `description` |
 | `artifact_query` | Query registered artifacts | — | `spec`, `task`, `agent`, `type` |
 | `state_constitution_get` | Get the project constitution | — | — |
 
 **Legacy aliases** accepted by `dispatch_tool` (but not recommended for new skill files):  
 `spec_get`, `spec_create`, `spec_update`, `slice_get`, `slice_create`, `slice_update`, `state_slice_get`, `state_slice_create`, `state_slice_update`, `task_get`, `task_create`, `task_update`, `event_emit`, `event_query`, `constitution_get`
+
+---
+
+## Memory Tools
+
+The six `memory_*` tools give agents a persistent, scoped, searchable scratchpad backed by the `memory` table in `.spex/state.db`. Entries are unique on `(agent, spec, key)` — upserts are idempotent. All reads filter out soft-deleted and TTL-expired entries automatically.
+
+### `memory_set`
+
+Store or update a value in agent memory.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent` | string | ✅ | Agent identifier (e.g. `spex-backend`) |
+| `key` | string | ✅ | Memory key — unique within `(agent, spec)` |
+| `value` | string | ✅ | Value to store (any string; JSON recommended for structured data) |
+| `spec` | string | | Scope entry to a specific spec ID; omit for global agent memory |
+| `type` | string | | Entry type: `decision` \| `architecture` \| `bugfix` \| `pattern` \| `config` \| `discovery` \| `learning` |
+| `ttl_seconds` | integer | | If set, entry is automatically hidden after this many seconds |
+
+Behaviour: if an entry with the same `(agent, spec, key)` already exists it is updated in place; `revision_count` is incremented on every update.
+
+---
+
+### `memory_get`
+
+Get a single value or list all entries for an agent.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent` | string | ✅ | Agent identifier |
+| `key` | string | | Key to retrieve; omit to return all entries for the agent |
+| `spec` | string | | Scope to a specific spec ID |
+
+Returns: the stored value string when `key` is given; a key→value map when `key` is omitted. Expired and deleted entries are excluded. Each successful `key` lookup bumps `access_count` and `last_accessed_at`.
+
+---
+
+### `memory_search`
+
+Full-text search across memory entries using SQLite FTS5.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent` | string | ✅ | Agent identifier |
+| `query` | string | ✅ | FTS5 query string (e.g. `"sqlite persistence"`) |
+| `spec` | string | | Restrict search to a specific spec scope |
+| `type` | string | | Restrict search to a specific entry type |
+| `limit` | integer | | Maximum number of results (default: 10) |
+
+Returns: list of matching `Memory` objects sorted by FTS5 relevance rank. Deleted and expired entries are excluded.
+
+---
+
+### `memory_delete`
+
+Soft-delete a memory entry.  The row is marked with a `deleted_at` timestamp and is immediately invisible to all read operations; it is not physically removed.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent` | string | ✅ | Agent identifier |
+| `key` | string | ✅ | Key to delete |
+| `spec` | string | | Scope to a specific spec ID (must match the scope used at insert time) |
+
+Returns: `true` if a row was affected; `false` if no matching active entry was found.
+
+---
+
+### `memory_context`
+
+Return the most recently accessed memory entries for session recovery.  Ordered by `last_accessed_at DESC` then `access_count DESC`.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent` | string | ✅ | Agent identifier |
+| `spec` | string | | Restrict to a specific spec scope |
+| `limit` | integer | | Maximum entries to return (default: 10) |
+
+Returns: list of `Memory` objects representing the agent's most recently touched entries.  Use this on startup to quickly restore context without a full scan.
+
+---
+
+### `memory_stats`
+
+Return aggregate statistics for an agent's memory store.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent` | string | ✅ | Agent identifier |
+| `spec` | string | | Scope statistics to a specific spec |
+
+Returns a JSON object with:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total` | integer | Total number of active (non-deleted, non-expired) entries |
+| `by_type` | object | Count per entry type; entries with no type appear under `"untyped"` |
+| `most_accessed_key` | string \| null | Key with the highest `access_count` |
+| `last_written_at` | string \| null | ISO-8601 timestamp of the most recently updated entry |
 
 ---
 

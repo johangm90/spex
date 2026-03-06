@@ -9,7 +9,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use crate::sdd::{
     artifact::{query_artifacts, register_artifact},
     event::{emit_event, query_events},
-    memory::{memory_get, memory_get_all, memory_set},
+    memory::{
+        memory_context, memory_delete, memory_get_all, memory_get_full, memory_search,
+        memory_set, memory_stats,
+    },
     spec::{
         create_spec, get_spec, list_specs, update_spec_ac, update_spec_agents, update_spec_status,
     },
@@ -400,8 +403,10 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .ok_or_else(|| anyhow::anyhow!("Missing field: value"))?
                 .to_string();
             let spec = args.get("spec").and_then(|v| v.as_str());
+            let mem_type = args.get("type").and_then(|v| v.as_str());
+            let ttl_seconds = args.get("ttl_seconds").and_then(|v| v.as_i64());
 
-            memory_set(pool, agent, key, &value, spec).await?;
+            memory_set(pool, agent, key, &value, spec, mem_type, ttl_seconds).await?;
             Ok(json!({"ok": true}))
         }
 
@@ -414,8 +419,21 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let spec = args.get("spec").and_then(|v| v.as_str());
 
             if let Some(key) = key {
-                let value = memory_get(pool, agent, key, spec).await?;
-                Ok(json!({"value": value.as_deref().map(parse_memory_value)}))
+                let memory = memory_get_full(pool, agent, key, spec).await?;
+                if let Some(m) = memory {
+                    let value = parse_memory_value(&m.value);
+                    Ok(json!({
+                        "value": value,
+                        "type": m.type_,
+                        "access_count": m.access_count,
+                        "last_accessed_at": m.last_accessed_at,
+                        "revision_count": m.revision_count,
+                        "expires_at": m.expires_at,
+                        "updated_at": m.updated_at,
+                    }))
+                } else {
+                    Ok(json!({"value": null}))
+                }
             } else {
                 let entries = memory_get_all(pool, agent, spec).await?;
                 let entries_obj: Vec<Value> = entries
@@ -491,6 +509,61 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 "exists": exists,
                 "is_template": is_template
             }))
+        }
+
+        "memory_search" => {
+            let agent = args
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
+            let query_str = args
+                .get("query")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: query"))?;
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            let mem_type = args.get("type").and_then(|v| v.as_str());
+            let limit = args.get("limit").and_then(|v| v.as_i64());
+
+            let results = memory_search(pool, agent, query_str, spec, mem_type, limit).await?;
+            Ok(json!(results))
+        }
+
+        "memory_delete" => {
+            let agent = args
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
+            let key = args
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: key"))?;
+            let spec = args.get("spec").and_then(|v| v.as_str());
+
+            let deleted = memory_delete(pool, agent, key, spec).await?;
+            Ok(json!({"deleted": deleted}))
+        }
+
+        "memory_context" => {
+            let agent = args
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            let limit = args.get("limit").and_then(|v| v.as_i64());
+
+            let entries = memory_context(pool, agent, spec, limit).await?;
+            Ok(json!(entries))
+        }
+
+        "memory_stats" => {
+            let agent = args
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
+            let spec = args.get("spec").and_then(|v| v.as_str());
+
+            let stats = memory_stats(pool, agent, spec).await?;
+            Ok(stats)
         }
 
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
@@ -734,7 +807,9 @@ fn build_tools_list() -> Value {
                     "agent": {"type": "string"},
                     "key": {"type": "string"},
                     "value": {},
-                    "spec": {"type": "string"}
+                    "spec": {"type": "string"},
+                    "type": {"type": "string", "enum": ["decision","architecture","bugfix","pattern","config","discovery","learning"]},
+                    "ttl_seconds": {"type": "integer", "description": "Optional time-to-live in seconds from now"}
                 },
                 "required": ["agent", "key", "value"]
             }
@@ -804,6 +879,59 @@ fn build_tools_list() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {}
+            }
+        },
+        {
+            "name": "memory_search",
+            "description": "Full-text search across agent memory entries using FTS5. Returns ranked results.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "query": {"type": "string", "description": "FTS5 search query"},
+                    "spec": {"type": "string"},
+                    "type": {"type": "string", "enum": ["decision","architecture","bugfix","pattern","config","discovery","learning"]},
+                    "limit": {"type": "integer", "default": 10}
+                },
+                "required": ["agent", "query"]
+            }
+        },
+        {
+            "name": "memory_delete",
+            "description": "Soft-delete a memory entry. Deleted entries are hidden from all other tools.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "key": {"type": "string"},
+                    "spec": {"type": "string"}
+                },
+                "required": ["agent", "key"]
+            }
+        },
+        {
+            "name": "memory_context",
+            "description": "Retrieve the most recently accessed memory entries for session recovery after context compaction.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "limit": {"type": "integer", "default": 10}
+                },
+                "required": ["agent"]
+            }
+        },
+        {
+            "name": "memory_stats",
+            "description": "Get memory statistics for an agent: total entries, breakdown by type, most accessed key, last write time.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "spec": {"type": "string"}
+                },
+                "required": ["agent"]
             }
         }
     ])

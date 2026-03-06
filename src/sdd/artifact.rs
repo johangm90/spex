@@ -15,6 +15,7 @@ pub struct Artifact {
     pub created_at: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn register_artifact(
     pool: &SqlitePool,
     id: &str,
