@@ -28,8 +28,7 @@ pub async fn cmd_plan_build(pool: &SqlitePool, spec_id: &str) -> Result<()> {
 
     let mut task_count = 0;
     loop {
-        let task_id = Text::new("Task ID (blank to finish):")
-            .prompt()?;
+        let task_id = Text::new("Task ID (blank to finish):").prompt()?;
 
         if task_id.trim().is_empty() {
             break;

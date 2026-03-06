@@ -105,8 +105,11 @@ pub async fn cmd_setup(global: bool) -> Result<()> {
     println!();
     println!("{} Setup complete!", "✓".green().bold());
     println!();
-    println!("You can now open OpenCode in any project where you have run {} or {}.",
-        "spex init".cyan(), "spex new".cyan());
+    println!(
+        "You can now open OpenCode in any project where you have run {} or {}.",
+        "spex init".cyan(),
+        "spex new".cyan()
+    );
 
     Ok(())
 }

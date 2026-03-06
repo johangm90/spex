@@ -15,8 +15,14 @@ pub async fn cmd_doctor(fix: bool) -> Result<()> {
     for result in &results {
         let icon = match result.status {
             CheckStatus::Pass => "✓".green().to_string(),
-            CheckStatus::Warn => { any_issue = true; "⚠".yellow().to_string() },
-            CheckStatus::Fail => { any_issue = true; "✗".red().to_string() },
+            CheckStatus::Warn => {
+                any_issue = true;
+                "⚠".yellow().to_string()
+            }
+            CheckStatus::Fail => {
+                any_issue = true;
+                "✗".red().to_string()
+            }
         };
         println!("  {} {}: {}", icon, result.name.bold(), result.message);
     }
@@ -45,25 +51,43 @@ pub async fn cmd_doctor(fix: bool) -> Result<()> {
             let icon = match result.status {
                 CheckStatus::Pass => "✓".green().to_string(),
                 CheckStatus::Warn => "⚠".yellow().to_string(),
-                CheckStatus::Fail => { still_fail = true; "✗".red().to_string() },
+                CheckStatus::Fail => {
+                    still_fail = true;
+                    "✗".red().to_string()
+                }
             };
             println!("  {} {}: {}", icon, result.name.bold(), result.message);
         }
         println!();
         if still_fail {
-            println!("{}", "Some checks still failing — manual action required.".red());
+            println!(
+                "{}",
+                "Some checks still failing — manual action required.".red()
+            );
             std::process::exit(1);
         } else {
             println!("{}", "All checks passed after auto-fix!".green().bold());
         }
     } else if any_issue {
-        let fail_count = results.iter().filter(|r| matches!(r.status, CheckStatus::Fail)).count();
+        let fail_count = results
+            .iter()
+            .filter(|r| matches!(r.status, CheckStatus::Fail))
+            .count();
         if fail_count > 0 {
-            println!("{}", "Some checks failed. Fix issues and re-run `spex doctor`.".red());
-            println!("  {}", "Tip: run `spex doctor --fix` to attempt automatic fixes.".dimmed());
+            println!(
+                "{}",
+                "Some checks failed. Fix issues and re-run `spex doctor`.".red()
+            );
+            println!(
+                "  {}",
+                "Tip: run `spex doctor --fix` to attempt automatic fixes.".dimmed()
+            );
             std::process::exit(1);
         } else {
-            println!("{}", "Some warnings found. Run `spex doctor --fix` to attempt automatic fixes.".yellow());
+            println!(
+                "{}",
+                "Some warnings found. Run `spex doctor --fix` to attempt automatic fixes.".yellow()
+            );
         }
     } else {
         println!("{}", "All checks passed!".green().bold());

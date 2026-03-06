@@ -82,7 +82,8 @@ fn check_prd() -> CheckResult {
         return CheckResult {
             name: "docs/PRD.md".to_string(),
             status: CheckStatus::Warn,
-            message: "docs/PRD.md not found. Run `spex init` or create docs/PRD.md manually.".to_string(),
+            message: "docs/PRD.md not found. Run `spex init` or create docs/PRD.md manually."
+                .to_string(),
         };
     }
     let content = match std::fs::read_to_string(&prd_path) {
@@ -185,7 +186,9 @@ fn check_opencode_json() -> CheckResult {
                 CheckResult {
                     name: "opencode.json".to_string(),
                     status: CheckStatus::Warn,
-                    message: "opencode.json exists but missing spex-state entry. Run `spex mcp setup`.".to_string(),
+                    message:
+                        "opencode.json exists but missing spex-state entry. Run `spex mcp setup`."
+                            .to_string(),
                 }
             }
         }
@@ -265,8 +268,14 @@ pub async fn fix_issues() -> Vec<(String, String)> {
     let spex_dir = cwd.join(".spex");
     if !spex_dir.exists() {
         match std::fs::create_dir_all(&spex_dir) {
-            Ok(_) => results.push(("State DB".to_string(), format!("Created {}", spex_dir.display()))),
-            Err(e) => results.push(("State DB".to_string(), format!("Could not create .spex/: {}", e))),
+            Ok(_) => results.push((
+                "State DB".to_string(),
+                format!("Created {}", spex_dir.display()),
+            )),
+            Err(e) => results.push((
+                "State DB".to_string(),
+                format!("Could not create .spex/: {}", e),
+            )),
         }
     }
 
@@ -274,22 +283,41 @@ pub async fn fix_issues() -> Vec<(String, String)> {
     let docs_dir = cwd.join("docs");
     let prd_path = docs_dir.join("PRD.md");
     if !prd_path.exists() {
-        let name = cwd.file_name().and_then(|n| n.to_str()).unwrap_or("project");
+        let name = cwd
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("project");
         let template = crate::scaffold::prd_template(name);
         let _ = std::fs::create_dir_all(&docs_dir);
         match std::fs::write(&prd_path, template) {
-            Ok(_) => results.push(("docs/PRD.md".to_string(), "Created docs/PRD.md with default template".to_string())),
-            Err(e) => results.push(("docs/PRD.md".to_string(), format!("Could not create docs/PRD.md: {}", e))),
+            Ok(_) => results.push((
+                "docs/PRD.md".to_string(),
+                "Created docs/PRD.md with default template".to_string(),
+            )),
+            Err(e) => results.push((
+                "docs/PRD.md".to_string(),
+                format!("Could not create docs/PRD.md: {}", e),
+            )),
         }
     }
 
     // Fix 3: Install skills if missing
     let config_dir = dirs::config_dir().unwrap_or_default();
     let skills_dir = config_dir.join("opencode").join("skills");
-    if !skills_dir.exists() || crate::skills_mgr::list_installed_skills(&skills_dir).map(|s| s.is_empty()).unwrap_or(true) {
+    if !skills_dir.exists()
+        || crate::skills_mgr::list_installed_skills(&skills_dir)
+            .map(|s| s.is_empty())
+            .unwrap_or(true)
+    {
         match crate::skills_mgr::install_bundled_skills(&skills_dir) {
-            Ok(_) => results.push(("Skills installed".to_string(), format!("Installed all bundled skills to {}", skills_dir.display()))),
-            Err(e) => results.push(("Skills installed".to_string(), format!("Could not install skills: {}", e))),
+            Ok(_) => results.push((
+                "Skills installed".to_string(),
+                format!("Installed all bundled skills to {}", skills_dir.display()),
+            )),
+            Err(e) => results.push((
+                "Skills installed".to_string(),
+                format!("Could not install skills: {}", e),
+            )),
         }
     }
 
@@ -303,10 +331,19 @@ pub async fn fix_issues() -> Vec<(String, String)> {
         });
         match serde_json::to_string_pretty(&config) {
             Ok(json_str) => match std::fs::write(&opencode_path, json_str) {
-                Ok(_) => results.push(("opencode.json".to_string(), "Created opencode.json with spex-state MCP entry".to_string())),
-                Err(e) => results.push(("opencode.json".to_string(), format!("Could not create opencode.json: {}", e))),
+                Ok(_) => results.push((
+                    "opencode.json".to_string(),
+                    "Created opencode.json with spex-state MCP entry".to_string(),
+                )),
+                Err(e) => results.push((
+                    "opencode.json".to_string(),
+                    format!("Could not create opencode.json: {}", e),
+                )),
             },
-            Err(e) => results.push(("opencode.json".to_string(), format!("Serialization error: {}", e))),
+            Err(e) => results.push((
+                "opencode.json".to_string(),
+                format!("Serialization error: {}", e),
+            )),
         }
     }
 
@@ -315,13 +352,22 @@ pub async fn fix_issues() -> Vec<(String, String)> {
         let mut found = false;
         let mut cur = cwd.clone();
         loop {
-            if cur.join(".git").exists() { found = true; break; }
-            match cur.parent() { Some(p) => cur = p.to_path_buf(), None => break }
+            if cur.join(".git").exists() {
+                found = true;
+                break;
+            }
+            match cur.parent() {
+                Some(p) => cur = p.to_path_buf(),
+                None => break,
+            }
         }
         found
     };
     if !has_git {
-        results.push(("Git repo".to_string(), "Cannot auto-fix: run `git init` manually to create a Git repository.".to_string()));
+        results.push((
+            "Git repo".to_string(),
+            "Cannot auto-fix: run `git init` manually to create a Git repository.".to_string(),
+        ));
     }
 
     results

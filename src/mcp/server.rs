@@ -10,8 +10,8 @@ use crate::sdd::{
     artifact::{query_artifacts, register_artifact},
     event::{emit_event, query_events},
     memory::{
-        memory_context, memory_delete, memory_get_all, memory_get_full, memory_search,
-        memory_set, memory_stats,
+        memory_context, memory_delete, memory_get_all, memory_get_full, memory_search, memory_set,
+        memory_stats,
     },
     spec::{
         create_spec, get_spec, list_specs, update_spec_ac, update_spec_agents, update_spec_status,
@@ -384,8 +384,16 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let since = args.get("since").and_then(|v| v.as_str());
             let until = args.get("until").and_then(|v| v.as_str());
 
-            let events =
-                query_events(pool, type_filter, spec_filter, agent_filter, limit, since, until).await?;
+            let events = query_events(
+                pool,
+                type_filter,
+                spec_filter,
+                agent_filter,
+                limit,
+                since,
+                until,
+            )
+            .await?;
             Ok(json!(events))
         }
 
@@ -492,7 +500,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
         "constitution_get" | "state_constitution_get" | "prd_get" | "state_prd_get" => {
             // Read docs/PRD.md (source of truth is the file, not the DB)
             let project_dir = detect_project_dir();
-            let prd_path = std::path::Path::new(&project_dir).join("docs").join("PRD.md");
+            let prd_path = std::path::Path::new(&project_dir)
+                .join("docs")
+                .join("PRD.md");
             let (content, exists) = if prd_path.exists() {
                 (std::fs::read_to_string(&prd_path).unwrap_or_default(), true)
             } else {

@@ -333,11 +333,7 @@ pub async fn memory_context(
 
 /// Returns memory statistics for an agent (optionally scoped to a spec).
 #[allow(dead_code)]
-pub async fn memory_stats(
-    pool: &SqlitePool,
-    agent: &str,
-    spec: Option<&str>,
-) -> Result<Value> {
+pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) -> Result<Value> {
     let (where_clause_base, spec_bind): (&str, bool) = if spec.is_some() {
         (
             "agent = ? AND spec = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
@@ -474,17 +470,9 @@ mod tests {
         .await
         .unwrap();
 
-        memory_set(
-            &pool,
-            "alice",
-            "unrelated",
-            "hello world",
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        memory_set(&pool, "alice", "unrelated", "hello world", None, None, None)
+            .await
+            .unwrap();
 
         let results = memory_search(&pool, "alice", "sqlite", None, None, None)
             .await
@@ -503,15 +491,17 @@ mod tests {
             .await
             .unwrap();
 
-        let deleted = memory_delete(&pool, "alice", "foo", None)
-            .await
-            .unwrap();
-        assert!(deleted, "memory_delete should return true when a row is affected");
+        let deleted = memory_delete(&pool, "alice", "foo", None).await.unwrap();
+        assert!(
+            deleted,
+            "memory_delete should return true when a row is affected"
+        );
 
-        let full = memory_get_full(&pool, "alice", "foo", None)
-            .await
-            .unwrap();
-        assert!(full.is_none(), "deleted entry must not be visible via memory_get_full");
+        let full = memory_get_full(&pool, "alice", "foo", None).await.unwrap();
+        assert!(
+            full.is_none(),
+            "deleted entry must not be visible via memory_get_full"
+        );
 
         let search_results = memory_search(&pool, "alice", "foo", None, None, None)
             .await
@@ -578,10 +568,7 @@ mod tests {
         let before = memory_get_full(&pool, "alice", "expiring_key", None)
             .await
             .unwrap();
-        assert!(
-            before.is_some(),
-            "entry must be visible before TTL expires"
-        );
+        assert!(before.is_some(), "entry must be visible before TTL expires");
 
         // Wait for the TTL to elapse.
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -608,13 +595,9 @@ mod tests {
         }
 
         // Access "k2" to bump its last_accessed_at to the most recent.
-        memory_get_full(&pool, "alice", "k2", None)
-            .await
-            .unwrap();
+        memory_get_full(&pool, "alice", "k2", None).await.unwrap();
 
-        let ctx = memory_context(&pool, "alice", None, Some(2))
-            .await
-            .unwrap();
+        let ctx = memory_context(&pool, "alice", None, Some(2)).await.unwrap();
 
         assert_eq!(ctx.len(), 2, "context should return exactly 2 entries");
         assert_eq!(ctx[0].key, "k2", "most recently accessed key must be first");
