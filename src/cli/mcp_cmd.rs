@@ -1,16 +1,16 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 use serde_json::json;
-use sqlx::SqlitePool;
 use std::path::PathBuf;
-
-use crate::mcp::server::run_mcp_server;
-use crate::tool_target::ToolTarget;
 use std::sync::Arc;
 
+use crate::mcp::server::run_mcp_server;
+use crate::sdd;
+use crate::tool_target::ToolTarget;
+
 /// Resolve the project directory from `SPEX_PROJECT_DIR` env var, or fall back
-/// to the current working directory.  Called by `main.rs` (T04-07) so that the
-/// DB walk-up happens in the right directory.
+/// to the current working directory.  Returns the raw (non-canonicalized) path;
+/// callers that need an absolute path should call `.canonicalize()` on the result.
 pub fn resolve_project_dir() -> Result<PathBuf> {
     if let Ok(dir) = std::env::var("SPEX_PROJECT_DIR") {
         let path = PathBuf::from(&dir);
@@ -23,23 +23,29 @@ pub fn resolve_project_dir() -> Result<PathBuf> {
     }
 }
 
-/// Start the MCP stdio server.
+/// Start the MCP stdio server against the global database.
 ///
-/// If `SPEX_PROJECT_DIR` is set the working directory is changed before the
-/// server loop starts so that any relative paths resolve correctly.
+/// The active project context is determined once at startup from
+/// `SPEX_PROJECT_DIR` (or the current working directory) and threaded through
+/// every tool call so that all reads/writes are scoped to that project.
 ///
-/// NOTE: the `pool` is already opened by `main.rs` at this point.
-/// TODO(T04-07): main.rs needs to pass SPEX_PROJECT_DIR through before opening
-/// the DB so that `open_project_db()` walks up from the right directory.
-pub async fn cmd_mcp_serve(pool: SqlitePool) -> Result<()> {
-    if let Ok(project_dir) = std::env::var("SPEX_PROJECT_DIR") {
-        // Change working directory so that open_project_db() walk-up finds the right .spex/state.db
-        std::env::set_current_dir(&project_dir)
-            .with_context(|| format!("SPEX_PROJECT_DIR={project_dir} is not a valid directory"))?;
-    }
+/// The pool is opened here against `~/.local/share/spex/global-state.db`;
+/// `main.rs` no longer needs to pre-open a pool for this command.
+pub async fn cmd_mcp_serve() -> Result<()> {
+    // Determine the active project directory for this server session.
+    let project_dir = resolve_project_dir()?
+        .canonicalize()
+        .context("Could not canonicalize project dir")?
+        .to_string_lossy()
+        .to_string();
 
-    let pool = Arc::new(pool);
-    run_mcp_server(pool).await
+    // Inform the host (e.g. OpenCode) which project is being served.
+    eprintln!("spex-state: serving project_dir={project_dir}");
+
+    // Open the global DB (shared across all projects on this machine).
+    let pool = Arc::new(sdd::db::open_global_db().await?);
+
+    run_mcp_server(pool, project_dir).await
 }
 
 /// Write or merge the spex-state MCP entry into the appropriate config file.
