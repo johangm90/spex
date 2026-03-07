@@ -5,8 +5,10 @@ use sqlx::SqlitePool;
 
 use crate::sdd::{
     event::emit_event,
+    ops_summary::summarize_spec_operations,
+    plan_version::{create_plan_version, list_plan_versions, supersede_plan_versions},
     spec::get_spec,
-    task::{create_task, list_tasks},
+    task::{create_task, list_tasks, task_runtime_metadata},
 };
 
 use super::util::colorize_status;
@@ -74,6 +76,16 @@ pub async fn cmd_plan_build(pool: &SqlitePool, spec_id: &str) -> Result<()> {
             title.trim(),
             agent.trim(),
             &inputs,
+            &[],
+            &[],
+            &[],
+            &[],
+            100,
+            "medium",
+            "coordinated_parallel",
+            3,
+            0,
+            None,
             output_artifact.as_deref(),
         )
         .await?;
@@ -83,15 +95,44 @@ pub async fn cmd_plan_build(pool: &SqlitePool, spec_id: &str) -> Result<()> {
     }
 
     if task_count > 0 {
+        let tasks = list_tasks(pool, Some(spec_id)).await?;
+        let existing_versions = list_plan_versions(pool, Some(spec_id)).await?;
+        let next_version = existing_versions
+            .iter()
+            .map(|p| p.version)
+            .max()
+            .unwrap_or(0)
+            + 1;
+        supersede_plan_versions(pool, spec_id).await?;
+        let plan_id = format!("PLAN-{}-v{}", spec_id, next_version);
+        let plan_json = serde_json::json!({
+            "spec": spec_id,
+            "version": next_version,
+            "task_count": tasks.len(),
+            "tasks": tasks,
+        });
+        create_plan_version(
+            pool,
+            &plan_id,
+            spec_id,
+            next_version,
+            Some("interactive plan build"),
+            &plan_json.to_string(),
+        )
+        .await?;
         emit_event(
             pool,
             "PlanBuilt",
             Some(spec_id),
             Some("human"),
-            &format!("{{\"task_count\": {}}}", task_count),
+            &format!(
+                "{{\"task_count\": {}, \"plan_version\": \"{}\"}}",
+                task_count, plan_id
+            ),
         )
         .await?;
         println!("{} Plan built with {} task(s).", "✓".green(), task_count);
+        println!("{} Active plan version: {}", "✓".green(), plan_id.cyan());
     } else {
         println!("{} No tasks added.", "ℹ".blue());
     }
@@ -110,6 +151,34 @@ pub async fn cmd_plan_show(pool: &SqlitePool, spec_id: &str) -> Result<()> {
     );
     println!("  {} — {}", spec.id.cyan(), spec.title.bold());
     println!("  Status: {}", colorize_status(&spec.status));
+    let ops = summarize_spec_operations(pool, spec_id).await?;
+    println!(
+        "  Ops: {} blocking incidents | {} blocking gaps | {} active interrupts | {} failing verifications",
+        ops.summary.blocking_incidents,
+        ops.summary.blocking_context_gaps,
+        ops.summary.active_interrupts,
+        ops.summary.verification_failures,
+    );
+    if ops.summary.blocking_incidents > 0 || ops.summary.blocking_context_gaps > 0 {
+        println!(
+            "  {}",
+            "Spec is not ready for the next wave until blockers are resolved.".red()
+        );
+    } else if !ops.next_actionable_tasks.is_empty() {
+        println!("  {}", "Next actionable tasks:".bold());
+        for task in ops.next_actionable_tasks.iter().take(5) {
+            let meta = task_runtime_metadata(task);
+            println!(
+                "    {} {} {}  {} [{} / {}]",
+                task.id.cyan(),
+                colorize_status(&task.status),
+                task.agent.dimmed(),
+                task.title,
+                meta.execution_bucket,
+                meta.risk_level
+            );
+        }
+    }
     println!();
 
     let tasks = list_tasks(pool, Some(spec_id)).await?;
@@ -123,22 +192,105 @@ pub async fn cmd_plan_show(pool: &SqlitePool, spec_id: &str) -> Result<()> {
     }
 
     println!(
-        "  {:<15} {:<12} {:<15} {}",
+        "  {:<15} {:<12} {:<15} {:<8} {:<20} {}",
         "Task ID".bold(),
         "Status".bold(),
         "Agent".bold(),
+        "Pri".bold(),
+        "Bucket/Risk".bold(),
         "Title".bold()
     );
-    println!("  {}", "─".repeat(65).dimmed());
+    println!("  {}", "─".repeat(100).dimmed());
 
     for task in &tasks {
+        let meta = task_runtime_metadata(task);
         println!(
-            "  {:<15} {:<12} {:<15} {}",
+            "  {:<15} {:<12} {:<15} {:<8} {:<20} {}",
             task.id.cyan(),
             colorize_status(&task.status),
             task.agent.dimmed(),
+            meta.priority,
+            format!(
+                "{}/{}/e{}/u{}",
+                meta.execution_bucket, meta.risk_level, meta.estimate_points, meta.unblock_value
+            ),
             task.title
         );
+        if !meta.depends_on.is_empty()
+            || !meta.lock_requirements.is_empty()
+            || !meta.conflicts_with.is_empty()
+        {
+            let deps = if meta.depends_on.is_empty() {
+                "-".to_string()
+            } else {
+                meta.depends_on.join(",")
+            };
+            let conflicts = if meta.conflicts_with.is_empty() {
+                "-".to_string()
+            } else {
+                meta.conflicts_with.join(",")
+            };
+            let locks = if meta.lock_requirements.is_empty() {
+                "-".to_string()
+            } else {
+                meta.lock_requirements
+                    .iter()
+                    .map(|l| format!("{}:{}", l.lock_type, l.resource))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            println!(
+                "  {:<15} {:<12} {:<15} {:<8} {:<20} deps={} conflicts={} locks={}",
+                "".dimmed(),
+                "".dimmed(),
+                "".dimmed(),
+                "".dimmed(),
+                "".dimmed(),
+                deps,
+                conflicts,
+                locks
+            );
+        }
+    }
+    Ok(())
+}
+
+pub async fn cmd_plan_dag(pool: &SqlitePool, spec_id: &str) -> Result<()> {
+    let spec = get_spec(pool, spec_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Spec '{}' not found", spec_id))?;
+    let tasks = list_tasks(pool, Some(spec_id)).await?;
+    if tasks.is_empty() {
+        println!("{}", "No tasks to visualize.".dimmed());
+        return Ok(());
+    }
+    println!(
+        "{}",
+        format!("═══ DAG: {} ═══════════════════════", spec.id).cyan()
+    );
+    println!("  {} — {}", spec.id.cyan(), spec.title.bold());
+    println!();
+    for task in &tasks {
+        let meta = task_runtime_metadata(task);
+        let deps = if meta.depends_on.is_empty() {
+            "(root)".to_string()
+        } else {
+            meta.depends_on.join(", ")
+        };
+        let conflicts = if meta.conflicts_with.is_empty() {
+            String::new()
+        } else {
+            format!(" | conflicts: {}", meta.conflicts_with.join(", "))
+        };
+        println!("  {} <- {}{}", task.id.cyan(), deps, conflicts);
+    }
+    println!();
+    println!("  {}", "Edges: dependency -> task".dimmed());
+    for task in &tasks {
+        let meta = task_runtime_metadata(task);
+        for dep in &meta.depends_on {
+            println!("  {} -> {}", dep.dimmed(), task.id.cyan());
+        }
     }
     Ok(())
 }

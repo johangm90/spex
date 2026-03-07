@@ -2,7 +2,9 @@ use anyhow::Result;
 use colored::Colorize;
 use sqlx::SqlitePool;
 
-use crate::sdd::{event::query_events, spec::list_specs, task::list_tasks};
+use crate::sdd::{
+    event::query_events, ops_summary::summarize_spec_operations, spec::list_specs, task::list_tasks,
+};
 
 use super::util::colorize_status;
 
@@ -40,24 +42,39 @@ pub async fn cmd_pulse(pool: &SqlitePool, since: Option<&str>, until: Option<&st
         let draft_count = specs.iter().filter(|s| s.status == "draft").count();
         let approved_count = specs.iter().filter(|s| s.status == "approved").count();
         let in_prog_count = specs.iter().filter(|s| s.status == "in_progress").count();
+        let blocked_count = specs.iter().filter(|s| s.status == "blocked").count();
+        let stabilizing_count = specs.iter().filter(|s| s.status == "stabilizing").count();
         let done_count = specs.iter().filter(|s| s.status == "done").count();
         let paused_count = specs.iter().filter(|s| s.status == "paused").count();
 
         println!(
-            "  {} draft  {} approved  {} in_progress  {} done  {} paused",
+            "  {} draft  {} approved  {} in_progress  {} blocked  {} stabilizing  {} done  {} paused",
             draft_count.to_string().white(),
             approved_count.to_string().yellow(),
             in_prog_count.to_string().blue(),
+            blocked_count.to_string().red(),
+            stabilizing_count.to_string().yellow(),
             done_count.to_string().green(),
             paused_count.to_string().dimmed()
         );
         println!();
+
+        let mut total_blocking_incidents = 0usize;
+        let mut total_blocking_gaps = 0usize;
+        let mut total_active_interrupts = 0usize;
+        let mut total_verification_failures = 0usize;
 
         // Per-spec progress bar
         for spec in &specs {
             let spec_tasks: Vec<_> = all_tasks.iter().filter(|t| t.spec == spec.id).collect();
             let total = spec_tasks.len();
             let done = spec_tasks.iter().filter(|t| t.status == "done").count();
+
+            let ops = summarize_spec_operations(pool, &spec.id).await?;
+            total_blocking_incidents += ops.summary.blocking_incidents;
+            total_blocking_gaps += ops.summary.blocking_context_gaps;
+            total_active_interrupts += ops.summary.active_interrupts;
+            total_verification_failures += ops.summary.verification_failures;
 
             let bar = if total > 0 {
                 let filled = (done * 20) / total;
@@ -71,15 +88,59 @@ pub async fn cmd_pulse(pool: &SqlitePool, since: Option<&str>, until: Option<&st
                 format!("[{}]", "░".repeat(20).dimmed())
             };
 
+            let mut alerts = Vec::new();
+            if ops.summary.blocking_incidents > 0 {
+                alerts.push(
+                    format!("{} blocking incidents", ops.summary.blocking_incidents)
+                        .red()
+                        .to_string(),
+                );
+            }
+            if ops.summary.blocking_context_gaps > 0 {
+                alerts.push(
+                    format!("{} blocking gaps", ops.summary.blocking_context_gaps)
+                        .red()
+                        .to_string(),
+                );
+            }
+            if ops.summary.active_interrupts > 0 {
+                alerts.push(
+                    format!("{} active interrupts", ops.summary.active_interrupts)
+                        .yellow()
+                        .to_string(),
+                );
+            }
+            if ops.summary.verification_failures > 0 {
+                alerts.push(
+                    format!("{} verify fails", ops.summary.verification_failures)
+                        .yellow()
+                        .to_string(),
+                );
+            }
+
             println!(
-                "  {:<12} {} {:<11} {}/{} tasks",
+                "  {:<12} {} {:<11} {}/{} tasks{}",
                 spec.id.cyan(),
                 bar,
                 colorize_status(&spec.status),
                 done,
-                total
+                total,
+                if alerts.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", alerts.join(" | "))
+                }
             );
         }
+
+        println!();
+        println!(
+            "  {} blockers  {} gaps  {} interrupts  {} failing verifications",
+            total_blocking_incidents.to_string().red(),
+            total_blocking_gaps.to_string().red(),
+            total_active_interrupts.to_string().yellow(),
+            total_verification_failures.to_string().yellow(),
+        );
     }
 
     // Recent events

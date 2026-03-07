@@ -9,8 +9,12 @@ pub enum SpecStatus {
     Draft,
     Approved,
     InProgress,
+    Blocked,
+    Stabilizing,
     Done,
     Paused,
+    Discarded,
+    Superseded,
 }
 
 #[allow(dead_code)]
@@ -20,8 +24,12 @@ impl SpecStatus {
             "draft" => Some(Self::Draft),
             "approved" => Some(Self::Approved),
             "in_progress" => Some(Self::InProgress),
+            "blocked" => Some(Self::Blocked),
+            "stabilizing" => Some(Self::Stabilizing),
             "done" => Some(Self::Done),
             "paused" => Some(Self::Paused),
+            "discarded" => Some(Self::Discarded),
+            "superseded" => Some(Self::Superseded),
             _ => None,
         }
     }
@@ -31,8 +39,12 @@ impl SpecStatus {
             Self::Draft => "draft",
             Self::Approved => "approved",
             Self::InProgress => "in_progress",
+            Self::Blocked => "blocked",
+            Self::Stabilizing => "stabilizing",
             Self::Done => "done",
             Self::Paused => "paused",
+            Self::Discarded => "discarded",
+            Self::Superseded => "superseded",
         }
     }
 }
@@ -167,10 +179,29 @@ fn validate_transition(from: &str, to: &str) -> Result<()> {
     let valid = matches!(
         (from, to),
         ("draft", "approved")
+            | ("draft", "discarded")
             | ("approved", "in_progress")
-            | ("in_progress", "done")
+            | ("approved", "discarded")
+            | ("approved", "superseded")
+            | ("in_progress", "blocked")
+            | ("in_progress", "stabilizing")
             | ("in_progress", "paused")
+            | ("in_progress", "discarded")
+            | ("in_progress", "superseded")
+            | ("blocked", "in_progress")
+            | ("blocked", "paused")
+            | ("blocked", "discarded")
+            | ("blocked", "superseded")
+            | ("stabilizing", "done")
+            | ("stabilizing", "blocked")
+            | ("stabilizing", "in_progress")
+            | ("stabilizing", "paused")
+            | ("stabilizing", "discarded")
+            | ("stabilizing", "superseded")
             | ("paused", "in_progress")
+            | ("paused", "discarded")
+            | ("paused", "superseded")
+            | ("done", "superseded")
     );
     if !valid {
         return Err(anyhow!("Invalid transition: {} -> {}", from, to));

@@ -1,5 +1,7 @@
 pub mod doctor;
 pub mod mcp_cmd;
+pub mod ops;
+pub mod orchestrate;
 pub mod plan;
 pub mod pulse;
 pub mod skill_cmd;

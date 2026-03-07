@@ -1,6 +1,17 @@
 pub mod artifact;
+pub mod context_gap;
 pub mod db;
 pub mod event;
+pub mod handoff_snapshot;
+pub mod incident;
+pub mod interrupt;
 pub mod memory;
+pub mod ops_summary;
+pub mod plan_version;
+pub mod replan_request;
+pub mod scheduler;
 pub mod spec;
 pub mod task;
+pub mod task_lease;
+pub mod task_lock;
+pub mod verification_run;

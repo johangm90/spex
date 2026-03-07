@@ -1,3 +1,4 @@
+#![recursion_limit = "512"]
 mod cli;
 mod doctor;
 mod mcp;
@@ -11,13 +12,30 @@ use clap::{Parser, Subcommand};
 use cli::{
     doctor::cmd_doctor,
     mcp_cmd::{cmd_mcp_serve, cmd_mcp_setup},
-    plan::{cmd_plan_build, cmd_plan_show},
+    ops::{
+        cmd_gap_add, cmd_gap_list, cmd_gap_show, cmd_gap_update, cmd_handoff_add, cmd_handoff_list,
+        cmd_handoff_show, cmd_incident_add, cmd_incident_list, cmd_incident_show,
+        cmd_incident_update, cmd_interrupt_add, cmd_interrupt_list, cmd_interrupt_show,
+        cmd_interrupt_update, cmd_verify_add, cmd_verify_list, cmd_verify_show,
+    },
+    orchestrate::{
+        cmd_orchestrate_claim, cmd_orchestrate_expire, cmd_orchestrate_heartbeat,
+        cmd_orchestrate_lock, cmd_orchestrate_locks, cmd_orchestrate_next,
+        cmd_orchestrate_plan_version, cmd_orchestrate_plan_versions, cmd_orchestrate_release,
+        cmd_orchestrate_replan, cmd_orchestrate_replan_update, cmd_orchestrate_replans,
+        cmd_orchestrate_task_metadata,
+    },
+    plan::{cmd_plan_build, cmd_plan_dag, cmd_plan_show},
     pulse::cmd_pulse,
     skill_cmd::{cmd_setup, cmd_skill_install, cmd_skill_list},
     spec::{
-        cmd_spec_add, cmd_spec_approve, cmd_spec_done, cmd_spec_list, cmd_spec_show, cmd_spec_start,
+        cmd_spec_add, cmd_spec_approve, cmd_spec_done, cmd_spec_list, cmd_spec_show,
+        cmd_spec_stabilize, cmd_spec_start,
     },
-    task::{cmd_task_add, cmd_task_done, cmd_task_fail, cmd_task_list, cmd_task_start},
+    task::{
+        cmd_task_add, cmd_task_block, cmd_task_cancel, cmd_task_done, cmd_task_list,
+        cmd_task_review, cmd_task_start, cmd_task_verify,
+    },
     trace::cmd_trace,
 };
 use sdd::db::open_project_db;
@@ -75,6 +93,42 @@ pub enum Commands {
         cmd: TaskCmd,
     },
 
+    /// Manage incidents
+    Incident {
+        #[command(subcommand)]
+        cmd: IncidentCmd,
+    },
+
+    /// Manage context gaps
+    Gap {
+        #[command(subcommand)]
+        cmd: GapCmd,
+    },
+
+    /// Manage verification runs
+    Verify {
+        #[command(subcommand)]
+        cmd: VerifyCmd,
+    },
+
+    /// Manage interrupts
+    Interrupt {
+        #[command(subcommand)]
+        cmd: InterruptCmd,
+    },
+
+    /// Manage handoff snapshots
+    Handoff {
+        #[command(subcommand)]
+        cmd: HandoffCmd,
+    },
+
+    /// Scheduler/runtime orchestration helpers
+    Orchestrate {
+        #[command(subcommand)]
+        cmd: OrchestrateCmd,
+    },
+
     /// Show project status dashboard
     Pulse {
         /// Show events since this timestamp or duration (e.g. 2026-01-01 or 1h)
@@ -130,6 +184,8 @@ pub enum SpecCmd {
     Approve { id: String },
     /// Start working on a spec
     Start { id: String },
+    /// Move a spec into stabilizing
+    Stabilize { id: String },
     /// Mark spec as done
     Done { id: String },
     /// List all specs
@@ -149,6 +205,8 @@ pub enum PlanCmd {
     Build { spec_id: String },
     /// Show the plan for a spec
     Show { spec_id: String },
+    /// Show task dependency DAG for a spec
+    Dag { spec_id: String },
 }
 
 // ─── Task Subcommands ─────────────────────────────────────────────────────────
@@ -165,19 +223,351 @@ pub enum TaskCmd {
         #[arg(long)]
         inputs: Vec<String>,
         #[arg(long)]
+        depends_on: Vec<String>,
+        #[arg(long)]
+        conflicts_with: Vec<String>,
+        #[arg(long)]
+        lock_set: Vec<String>,
+        #[arg(long, default_value_t = 100)]
+        priority: i64,
+        #[arg(long, default_value = "medium")]
+        risk_level: String,
+        #[arg(long, default_value = "coordinated_parallel")]
+        execution_bucket: String,
+        #[arg(long, default_value_t = 3)]
+        estimate_points: i64,
+        #[arg(long, default_value_t = 0)]
+        unblock_value: i64,
+        #[arg(long)]
+        plan_version: Option<String>,
+        #[arg(long)]
         output_artifact: Option<String>,
     },
     /// Start a task
     Start { id: String },
+    /// Mark task as blocked
+    Block { id: String },
+    /// Mark task as in review
+    Review { id: String },
+    /// Mark task as verified
+    Verify { id: String },
     /// Mark task as done
     Done { id: String },
-    /// Mark task as failed
-    Fail { id: String },
+    /// Cancel a task
+    Cancel { id: String },
     /// List tasks
     List {
         spec_id: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum IncidentCmd {
+    Add {
+        id: String,
+        spec: String,
+        title: String,
+        #[arg(long)]
+        severity: String,
+        #[arg(long)]
+        source: String,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long, default_value_t = false)]
+        blocking: bool,
+        #[arg(long)]
+        repro_steps: Option<String>,
+    },
+    Show {
+        id: String,
+    },
+    Update {
+        id: String,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        blocking: Option<bool>,
+        #[arg(long)]
+        root_cause: Option<String>,
+        #[arg(long)]
+        fix_strategy: Option<String>,
+    },
+    List {
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum GapCmd {
+    Add {
+        id: String,
+        spec: String,
+        question: String,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        criticality: String,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long, default_value_t = false)]
+        blocking: bool,
+        #[arg(long)]
+        assumption: Option<String>,
+    },
+    Show {
+        id: String,
+    },
+    Update {
+        id: String,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        blocking: Option<bool>,
+        #[arg(long)]
+        assumption: Option<String>,
+        #[arg(long)]
+        resolution: Option<String>,
+    },
+    List {
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum VerifyCmd {
+    Add {
+        id: String,
+        spec: String,
+        summary: String,
+        #[arg(long)]
+        kind: String,
+        #[arg(long)]
+        status: String,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        slice: Option<String>,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long)]
+        evidence: Option<String>,
+    },
+    Show {
+        id: String,
+    },
+    List {
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum InterruptCmd {
+    Add {
+        id: String,
+        spec: String,
+        #[arg(long)]
+        reason_type: String,
+        #[arg(long)]
+        preempted_tasks: Vec<String>,
+        #[arg(long)]
+        resume_hint: Option<String>,
+    },
+    Show {
+        id: String,
+    },
+    Update {
+        id: String,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        resume_hint: Option<String>,
+    },
+    List {
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum HandoffCmd {
+    Add {
+        id: String,
+        spec: String,
+        #[arg(long)]
+        interrupt: Option<String>,
+        #[arg(long)]
+        last_wave: Option<i64>,
+        #[arg(long)]
+        last_task: Option<String>,
+        #[arg(long)]
+        files_touched: Vec<String>,
+        #[arg(long)]
+        decisions: Vec<String>,
+        #[arg(long)]
+        open_risks: Vec<String>,
+        #[arg(long)]
+        next_steps: Vec<String>,
+    },
+    Show {
+        id: String,
+    },
+    List {
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum OrchestrateCmd {
+    /// Show next schedulable task for an agent
+    Next {
+        spec: String,
+        #[arg(long)]
+        agent: String,
+    },
+    /// Claim a task lease
+    Claim {
+        task: String,
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        agent: String,
+        #[arg(long, default_value_t = false)]
+        auto_lock: bool,
+        #[arg(long, default_value_t = 1800)]
+        ttl: i64,
+    },
+    /// Heartbeat an active task lease
+    Heartbeat {
+        task: String,
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        progress: Option<String>,
+        #[arg(long, default_value_t = 1800)]
+        ttl: i64,
+    },
+    /// Release a task lease
+    Release {
+        task: String,
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        final_status: Option<String>,
+    },
+    /// Expire stale leases
+    Expire,
+    /// Acquire locks for a task
+    Lock {
+        task: String,
+        spec: String,
+        #[arg(long)]
+        module: Vec<String>,
+        #[arg(long)]
+        semantic: Vec<String>,
+        #[arg(long)]
+        file: Vec<String>,
+    },
+    /// List active locks
+    Locks {
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        task: Option<String>,
+    },
+    /// Update stored task scheduling metadata
+    TaskMetadata {
+        task: String,
+        #[arg(long)]
+        depends_on: Vec<String>,
+        #[arg(long)]
+        conflicts_with: Vec<String>,
+        #[arg(long)]
+        lock_set: Vec<String>,
+        #[arg(long)]
+        priority: Option<i64>,
+        #[arg(long)]
+        risk_level: Option<String>,
+        #[arg(long)]
+        execution_bucket: Option<String>,
+        #[arg(long)]
+        estimate_points: Option<i64>,
+        #[arg(long)]
+        unblock_value: Option<i64>,
+        #[arg(long)]
+        plan_version: Option<String>,
+    },
+
+    /// Create a replan request
+    Replan {
+        id: String,
+        spec: String,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        agent: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        impact: Vec<String>,
+        #[arg(long)]
+        proposed_action: Option<String>,
+    },
+    /// List replan requests
+    Replans {
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Update a replan request
+    ReplanUpdate {
+        id: String,
+        #[arg(long)]
+        status: String,
+    },
+    /// Register a plan version
+    PlanVersion {
+        id: String,
+        spec: String,
+        #[arg(long)]
+        version: i64,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long)]
+        plan_json: String,
+        #[arg(long, default_value_t = false)]
+        supersede: bool,
+    },
+    /// List plan versions
+    PlanVersions {
+        #[arg(long)]
+        spec: Option<String>,
     },
 }
 
@@ -239,6 +629,7 @@ async fn main() -> Result<()> {
                 } => cmd_spec_add(&pool, &id, &title, &priority).await?,
                 SpecCmd::Approve { id } => cmd_spec_approve(&pool, &id).await?,
                 SpecCmd::Start { id } => cmd_spec_start(&pool, &id).await?,
+                SpecCmd::Stabilize { id } => cmd_spec_stabilize(&pool, &id).await?,
                 SpecCmd::Done { id } => cmd_spec_done(&pool, &id).await?,
                 SpecCmd::List { json } => cmd_spec_list(&pool, json).await?,
                 SpecCmd::Show { id } => cmd_spec_show(&pool, &id).await?,
@@ -250,6 +641,7 @@ async fn main() -> Result<()> {
             match cmd {
                 PlanCmd::Build { spec_id } => cmd_plan_build(&pool, &spec_id).await?,
                 PlanCmd::Show { spec_id } => cmd_plan_show(&pool, &spec_id).await?,
+                PlanCmd::Dag { spec_id } => cmd_plan_dag(&pool, &spec_id).await?,
             }
         }
 
@@ -262,6 +654,15 @@ async fn main() -> Result<()> {
                     title,
                     agent,
                     inputs,
+                    depends_on,
+                    conflicts_with,
+                    lock_set,
+                    priority,
+                    risk_level,
+                    execution_bucket,
+                    estimate_points,
+                    unblock_value,
+                    plan_version,
                     output_artifact,
                 } => {
                     cmd_task_add(
@@ -271,15 +672,373 @@ async fn main() -> Result<()> {
                         &title,
                         &agent,
                         &inputs,
+                        &depends_on,
+                        &conflicts_with,
+                        &lock_set,
+                        priority,
+                        &risk_level,
+                        &execution_bucket,
+                        estimate_points,
+                        unblock_value,
+                        plan_version,
                         output_artifact,
                     )
                     .await?
                 }
                 TaskCmd::Start { id } => cmd_task_start(&pool, &id).await?,
+                TaskCmd::Block { id } => cmd_task_block(&pool, &id).await?,
+                TaskCmd::Review { id } => cmd_task_review(&pool, &id).await?,
+                TaskCmd::Verify { id } => cmd_task_verify(&pool, &id).await?,
                 TaskCmd::Done { id } => cmd_task_done(&pool, &id).await?,
-                TaskCmd::Fail { id } => cmd_task_fail(&pool, &id).await?,
+                TaskCmd::Cancel { id } => cmd_task_cancel(&pool, &id).await?,
                 TaskCmd::List { spec_id, json } => {
                     cmd_task_list(&pool, spec_id.as_deref(), json).await?
+                }
+            }
+        }
+
+        Commands::Incident { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                IncidentCmd::Add {
+                    id,
+                    spec,
+                    title,
+                    severity,
+                    source,
+                    task,
+                    blocking,
+                    repro_steps,
+                } => {
+                    cmd_incident_add(
+                        &pool,
+                        &id,
+                        &spec,
+                        task.as_deref(),
+                        &title,
+                        &severity,
+                        &source,
+                        blocking,
+                        repro_steps.as_deref(),
+                    )
+                    .await?
+                }
+                IncidentCmd::Show { id } => cmd_incident_show(&pool, &id).await?,
+                IncidentCmd::Update {
+                    id,
+                    status,
+                    blocking,
+                    root_cause,
+                    fix_strategy,
+                } => {
+                    cmd_incident_update(
+                        &pool,
+                        &id,
+                        status.as_deref(),
+                        blocking,
+                        root_cause.as_deref(),
+                        fix_strategy.as_deref(),
+                    )
+                    .await?
+                }
+                IncidentCmd::List { spec, status, json } => {
+                    cmd_incident_list(&pool, spec.as_deref(), status.as_deref(), json).await?
+                }
+            }
+        }
+
+        Commands::Gap { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                GapCmd::Add {
+                    id,
+                    spec,
+                    question,
+                    kind,
+                    criticality,
+                    task,
+                    blocking,
+                    assumption,
+                } => {
+                    cmd_gap_add(
+                        &pool,
+                        &id,
+                        &spec,
+                        task.as_deref(),
+                        &kind,
+                        &criticality,
+                        blocking,
+                        &question,
+                        assumption.as_deref(),
+                    )
+                    .await?
+                }
+                GapCmd::Show { id } => cmd_gap_show(&pool, &id).await?,
+                GapCmd::Update {
+                    id,
+                    status,
+                    blocking,
+                    assumption,
+                    resolution,
+                } => {
+                    cmd_gap_update(
+                        &pool,
+                        &id,
+                        status.as_deref(),
+                        blocking,
+                        assumption.as_deref(),
+                        resolution.as_deref(),
+                    )
+                    .await?
+                }
+                GapCmd::List { spec, status, json } => {
+                    cmd_gap_list(&pool, spec.as_deref(), status.as_deref(), json).await?
+                }
+            }
+        }
+
+        Commands::Verify { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                VerifyCmd::Add {
+                    id,
+                    spec,
+                    summary,
+                    kind,
+                    status,
+                    task,
+                    slice,
+                    command,
+                    evidence,
+                } => {
+                    cmd_verify_add(
+                        &pool,
+                        &id,
+                        &spec,
+                        task.as_deref(),
+                        slice.as_deref(),
+                        &kind,
+                        &status,
+                        command.as_deref(),
+                        &summary,
+                        evidence.as_deref(),
+                    )
+                    .await?
+                }
+                VerifyCmd::Show { id } => cmd_verify_show(&pool, &id).await?,
+                VerifyCmd::List {
+                    spec,
+                    task,
+                    status,
+                    json,
+                } => {
+                    cmd_verify_list(
+                        &pool,
+                        spec.as_deref(),
+                        task.as_deref(),
+                        status.as_deref(),
+                        json,
+                    )
+                    .await?
+                }
+            }
+        }
+
+        Commands::Interrupt { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                InterruptCmd::Add {
+                    id,
+                    spec,
+                    reason_type,
+                    preempted_tasks,
+                    resume_hint,
+                } => {
+                    cmd_interrupt_add(
+                        &pool,
+                        &id,
+                        &spec,
+                        &reason_type,
+                        &preempted_tasks,
+                        resume_hint.as_deref(),
+                    )
+                    .await?
+                }
+                InterruptCmd::Show { id } => cmd_interrupt_show(&pool, &id).await?,
+                InterruptCmd::Update {
+                    id,
+                    status,
+                    resume_hint,
+                } => {
+                    cmd_interrupt_update(&pool, &id, status.as_deref(), resume_hint.as_deref())
+                        .await?
+                }
+                InterruptCmd::List { spec, status, json } => {
+                    cmd_interrupt_list(&pool, spec.as_deref(), status.as_deref(), json).await?
+                }
+            }
+        }
+
+        Commands::Handoff { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                HandoffCmd::Add {
+                    id,
+                    spec,
+                    interrupt,
+                    last_wave,
+                    last_task,
+                    files_touched,
+                    decisions,
+                    open_risks,
+                    next_steps,
+                } => {
+                    cmd_handoff_add(
+                        &pool,
+                        &id,
+                        &spec,
+                        interrupt.as_deref(),
+                        last_wave,
+                        last_task.as_deref(),
+                        &files_touched,
+                        &decisions,
+                        &open_risks,
+                        &next_steps,
+                    )
+                    .await?
+                }
+                HandoffCmd::Show { id } => cmd_handoff_show(&pool, &id).await?,
+                HandoffCmd::List { spec, json } => {
+                    cmd_handoff_list(&pool, spec.as_deref(), json).await?
+                }
+            }
+        }
+
+        Commands::Orchestrate { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                OrchestrateCmd::Next { spec, agent } => {
+                    cmd_orchestrate_next(&pool, &spec, &agent).await?
+                }
+                OrchestrateCmd::Claim {
+                    task,
+                    spec,
+                    agent,
+                    auto_lock,
+                    ttl,
+                } => {
+                    cmd_orchestrate_claim(&pool, spec.as_deref(), &task, &agent, auto_lock, ttl)
+                        .await?
+                }
+                OrchestrateCmd::Heartbeat {
+                    task,
+                    spec,
+                    progress,
+                    ttl,
+                } => {
+                    cmd_orchestrate_heartbeat(
+                        &pool,
+                        spec.as_deref(),
+                        &task,
+                        ttl,
+                        progress.as_deref(),
+                    )
+                    .await?
+                }
+                OrchestrateCmd::Release {
+                    task,
+                    spec,
+                    final_status,
+                } => {
+                    cmd_orchestrate_release(&pool, spec.as_deref(), &task, final_status.as_deref())
+                        .await?
+                }
+                OrchestrateCmd::Expire => cmd_orchestrate_expire(&pool).await?,
+                OrchestrateCmd::Lock {
+                    task,
+                    spec,
+                    module,
+                    semantic,
+                    file,
+                } => cmd_orchestrate_lock(&pool, &task, &spec, &module, &semantic, &file).await?,
+                OrchestrateCmd::Locks { spec, task } => {
+                    cmd_orchestrate_locks(&pool, spec.as_deref(), task.as_deref()).await?
+                }
+                OrchestrateCmd::TaskMetadata {
+                    task,
+                    depends_on,
+                    conflicts_with,
+                    lock_set,
+                    priority,
+                    risk_level,
+                    execution_bucket,
+                    estimate_points,
+                    unblock_value,
+                    plan_version,
+                } => {
+                    cmd_orchestrate_task_metadata(
+                        &pool,
+                        &task,
+                        &depends_on,
+                        &conflicts_with,
+                        &lock_set,
+                        priority,
+                        risk_level.as_deref(),
+                        execution_bucket.as_deref(),
+                        estimate_points,
+                        unblock_value,
+                        plan_version.as_deref(),
+                    )
+                    .await?
+                }
+                OrchestrateCmd::Replan {
+                    id,
+                    spec,
+                    task,
+                    agent,
+                    reason,
+                    impact,
+                    proposed_action,
+                } => {
+                    cmd_orchestrate_replan(
+                        &pool,
+                        &id,
+                        &spec,
+                        task.as_deref(),
+                        &agent,
+                        &reason,
+                        &impact,
+                        proposed_action.as_deref(),
+                    )
+                    .await?
+                }
+                OrchestrateCmd::Replans { spec, status } => {
+                    cmd_orchestrate_replans(&pool, spec.as_deref(), status.as_deref()).await?
+                }
+                OrchestrateCmd::ReplanUpdate { id, status } => {
+                    cmd_orchestrate_replan_update(&pool, &id, &status).await?
+                }
+                OrchestrateCmd::PlanVersion {
+                    id,
+                    spec,
+                    version,
+                    reason,
+                    plan_json,
+                    supersede,
+                } => {
+                    cmd_orchestrate_plan_version(
+                        &pool,
+                        &id,
+                        &spec,
+                        version,
+                        reason.as_deref(),
+                        &plan_json,
+                        supersede,
+                    )
+                    .await?
+                }
+                OrchestrateCmd::PlanVersions { spec } => {
+                    cmd_orchestrate_plan_versions(&pool, spec.as_deref()).await?
                 }
             }
         }

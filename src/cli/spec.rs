@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 
 use crate::sdd::{
     event::emit_event,
+    ops_summary::summarize_spec_operations,
     spec::{create_spec, get_spec, list_specs, update_spec_status},
     task::list_tasks,
 };
@@ -34,6 +35,15 @@ pub async fn cmd_spec_approve(pool: &SqlitePool, id: &str) -> Result<()> {
 }
 
 pub async fn cmd_spec_start(pool: &SqlitePool, id: &str) -> Result<()> {
+    let ops = summarize_spec_operations(pool, id).await?;
+    if ops.summary.blocking_incidents > 0 || ops.summary.blocking_context_gaps > 0 {
+        return Err(anyhow::anyhow!(
+            "Spec '{}' has blocking operational records ({} incidents, {} context gaps); resolve them before starting.",
+            id,
+            ops.summary.blocking_incidents,
+            ops.summary.blocking_context_gaps
+        ));
+    }
     let spec = update_spec_status(pool, id, "in_progress", "human").await?;
     emit_event(pool, "SpecStarted", Some(id), Some("human"), "{}").await?;
     println!(
@@ -45,7 +55,41 @@ pub async fn cmd_spec_start(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
+pub async fn cmd_spec_stabilize(pool: &SqlitePool, id: &str) -> Result<()> {
+    let ops = summarize_spec_operations(pool, id).await?;
+    if ops.summary.blocking_incidents > 0 || ops.summary.blocking_context_gaps > 0 {
+        return Err(anyhow::anyhow!(
+            "Spec '{}' cannot enter stabilizing with blockers ({} incidents, {} context gaps).",
+            id,
+            ops.summary.blocking_incidents,
+            ops.summary.blocking_context_gaps
+        ));
+    }
+    let spec = update_spec_status(pool, id, "stabilizing", "human").await?;
+    emit_event(pool, "SpecStabilizing", Some(id), Some("human"), "{}").await?;
+    println!(
+        "{} Spec {} is now {}.",
+        "✓".green(),
+        spec.id.cyan(),
+        colorize_status("stabilizing")
+    );
+    Ok(())
+}
+
 pub async fn cmd_spec_done(pool: &SqlitePool, id: &str) -> Result<()> {
+    let ops = summarize_spec_operations(pool, id).await?;
+    if ops.summary.blocking_incidents > 0
+        || ops.summary.blocking_context_gaps > 0
+        || ops.summary.verification_failures > 0
+    {
+        return Err(anyhow::anyhow!(
+            "Spec '{}' cannot be completed with blockers or failing verification ({} incidents, {} context gaps, {} failing runs).",
+            id,
+            ops.summary.blocking_incidents,
+            ops.summary.blocking_context_gaps,
+            ops.summary.verification_failures
+        ));
+    }
     let spec = update_spec_status(pool, id, "done", "human").await?;
     emit_event(pool, "SpecCompleted", Some(id), Some("human"), "{}").await?;
     println!(
@@ -116,6 +160,16 @@ pub async fn cmd_spec_show(pool: &SqlitePool, id: &str) -> Result<()> {
         colorize_status(&spec.status),
         spec.priority
     );
+    let ops = summarize_spec_operations(pool, id).await?;
+    println!(
+        "  Ops:      {} open incidents ({} blocking) | {} open gaps ({} blocking) | {} active interrupts | {} failing verifications",
+        ops.summary.open_incidents,
+        ops.summary.blocking_incidents,
+        ops.summary.open_context_gaps,
+        ops.summary.blocking_context_gaps,
+        ops.summary.active_interrupts,
+        ops.summary.verification_failures,
+    );
     let ac = if spec.ac_total > 0 {
         format!("{}/{}", spec.ac_passed, spec.ac_total)
     } else {
@@ -140,6 +194,20 @@ pub async fn cmd_spec_show(pool: &SqlitePool, id: &str) -> Result<()> {
 
     println!();
     let tasks = list_tasks(pool, Some(id)).await?;
+    if !ops.next_actionable_tasks.is_empty() {
+        println!("  {}", "Next actionable tasks:".bold());
+        for task in ops.next_actionable_tasks.iter().take(5) {
+            println!(
+                "    {} {} {}  {}",
+                task.id.cyan(),
+                colorize_status(&task.status),
+                task.agent.dimmed(),
+                task.title
+            );
+        }
+        println!();
+    }
+
     if tasks.is_empty() {
         println!(
             "  {}",

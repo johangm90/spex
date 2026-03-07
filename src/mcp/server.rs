@@ -8,15 +8,35 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::sdd::{
     artifact::{query_artifacts, register_artifact},
+    context_gap::{create_context_gap, get_context_gap, list_context_gaps, update_context_gap},
     event::{emit_event, query_events},
+    handoff_snapshot::{create_handoff_snapshot, get_handoff_snapshot, list_handoff_snapshots},
+    incident::{create_incident, get_incident, list_incidents, update_incident},
+    interrupt::{create_interrupt, get_interrupt, list_interrupts, update_interrupt},
     memory::{
         memory_context, memory_delete, memory_get_all, memory_get_full, memory_search, memory_set,
         memory_stats,
     },
+    plan_version::{
+        create_plan_version, get_plan_version, list_plan_versions, supersede_plan_versions,
+    },
+    replan_request::{
+        create_replan_request, get_replan_request, list_replan_requests, update_replan_request,
+    },
+    scheduler::scheduler_next,
     spec::{
         create_spec, get_spec, list_specs, update_spec_ac, update_spec_agents, update_spec_status,
     },
-    task::{create_task, get_task, list_tasks, update_task_output_artifact, update_task_status},
+    task::{
+        create_task, get_task, list_tasks, update_task_metadata, update_task_output_artifact,
+        update_task_status, TaskLockRequirement,
+    },
+    task_lease::{
+        claim_task_lease, expire_stale_task_leases, get_task_lease, heartbeat_task_lease,
+        list_task_leases, release_task_lease,
+    },
+    task_lock::{acquire_task_locks, query_task_locks, release_task_locks},
+    verification_run::{create_verification_run, get_verification_run, list_verification_runs},
 };
 
 #[derive(Debug, Deserialize)]
@@ -183,6 +203,48 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let specs = list_specs(pool).await?;
             let tasks = list_tasks(pool, None).await?;
             let events = query_events(pool, None, None, None, Some(10), None, None).await?;
+            let incidents = list_incidents(pool, None, None).await?;
+            let context_gaps = list_context_gaps(pool, None, None).await?;
+            let interrupts = list_interrupts(pool, None, None).await?;
+            let verification_runs = list_verification_runs(pool, None, None, None).await?;
+            let active_plan_versions = list_plan_versions(pool, None).await?;
+            let leases = list_task_leases(pool, None).await?;
+            let active_locks = query_task_locks(pool, None, None, true).await?;
+            let open_replans = list_replan_requests(pool, None, Some("open")).await?;
+            let open_incidents: Vec<_> = incidents
+                .iter()
+                .filter(|i| {
+                    i.status != "resolved"
+                        && i.status != "duplicate"
+                        && i.status != "not_reproducible"
+                })
+                .cloned()
+                .collect();
+            let blocking_incidents: Vec<_> = open_incidents
+                .iter()
+                .filter(|i| i.blocking)
+                .cloned()
+                .collect();
+            let open_context_gaps: Vec<_> = context_gaps
+                .iter()
+                .filter(|g| g.status != "resolved" && g.status != "wont_fix")
+                .cloned()
+                .collect();
+            let blocking_context_gaps: Vec<_> = open_context_gaps
+                .iter()
+                .filter(|g| g.blocking)
+                .cloned()
+                .collect();
+            let active_interrupts: Vec<_> = interrupts
+                .iter()
+                .filter(|it| it.status == "open" || it.status == "active")
+                .cloned()
+                .collect();
+            let verification_failures: Vec<_> = verification_runs
+                .iter()
+                .filter(|v| v.status == "fail" || v.status == "blocked" || v.status == "flaky")
+                .cloned()
+                .collect();
             let project_dir = detect_project_dir();
             let config_source = detect_config_source(&project_dir);
 
@@ -190,6 +252,28 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 "specs": specs,
                 "tasks": tasks,
                 "recent_events": events,
+                "operational_summary": {
+                    "open_incidents": open_incidents.len(),
+                    "blocking_incidents": blocking_incidents.len(),
+                    "open_context_gaps": open_context_gaps.len(),
+                    "blocking_context_gaps": blocking_context_gaps.len(),
+                    "active_interrupts": active_interrupts.len(),
+                    "verification_failures": verification_failures.len(),
+                    "active_plan_versions": active_plan_versions.iter().filter(|p| p.status == "active").count(),
+                    "active_leases": leases.iter().filter(|l| l.status == "claimed" || l.status == "running").count(),
+                    "active_locks": active_locks.len(),
+                    "open_replans": open_replans.len()
+                },
+                "blocking_records": {
+                    "incidents": blocking_incidents.into_iter().take(10).collect::<Vec<_>>(),
+                    "context_gaps": blocking_context_gaps.into_iter().take(10).collect::<Vec<_>>()
+                },
+                "active_interrupts": active_interrupts.into_iter().take(10).collect::<Vec<_>>(),
+                "recent_verification_failures": verification_failures.into_iter().take(10).collect::<Vec<_>>(),
+                "active_plan_versions": active_plan_versions.into_iter().filter(|p| p.status == "active").take(10).collect::<Vec<_>>(),
+                "active_leases": leases.into_iter().filter(|l| l.status == "claimed" || l.status == "running").take(20).collect::<Vec<_>>(),
+                "active_locks": active_locks.into_iter().take(20).collect::<Vec<_>>(),
+                "open_replans": open_replans.into_iter().take(20).collect::<Vec<_>>(),
                 "project_dir": project_dir,
                 "config_source": config_source
             });
@@ -334,9 +418,87 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                         .collect()
                 })
                 .unwrap_or_default();
+            let depends_on: Vec<String> = args
+                .get("depends_on")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let conflicts_with: Vec<String> = args
+                .get("conflicts_with")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let lock_set: Vec<String> = args
+                .get("lock_set")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let lock_requirements: Vec<TaskLockRequirement> = args
+                .get("lock_requirements")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|item| {
+                            Some(TaskLockRequirement {
+                                lock_type: item.get("lock_type")?.as_str()?.to_string(),
+                                resource: item.get("resource")?.as_str()?.to_string(),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let priority = args.get("priority").and_then(|v| v.as_i64()).unwrap_or(100);
+            let risk_level = args
+                .get("risk_level")
+                .and_then(|v| v.as_str())
+                .unwrap_or("medium");
+            let execution_bucket = args
+                .get("execution_bucket")
+                .and_then(|v| v.as_str())
+                .unwrap_or("coordinated_parallel");
+            let estimate_points = args
+                .get("estimate_points")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(3);
+            let unblock_value = args
+                .get("unblock_value")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let plan_version = args.get("plan_version").and_then(|v| v.as_str());
             let output_artifact = args.get("output_artifact").and_then(|v| v.as_str());
 
-            let task = create_task(pool, id, spec, title, agent, &inputs, output_artifact).await?;
+            let task = create_task(
+                pool,
+                id,
+                spec,
+                title,
+                agent,
+                &inputs,
+                &depends_on,
+                &conflicts_with,
+                &lock_set,
+                &lock_requirements,
+                priority,
+                risk_level,
+                execution_bucket,
+                estimate_points,
+                unblock_value,
+                plan_version,
+                output_artifact,
+            )
+            .await?;
             Ok(json!(task))
         }
 
@@ -354,10 +516,608 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 update_task_output_artifact(pool, id, artifact).await?;
             }
 
+            if args.get("depends_on").is_some()
+                || args.get("conflicts_with").is_some()
+                || args.get("lock_set").is_some()
+                || args.get("lock_requirements").is_some()
+                || args.get("priority").is_some()
+                || args.get("risk_level").is_some()
+                || args.get("execution_bucket").is_some()
+                || args.get("plan_version").is_some()
+            {
+                let depends_on: Option<Vec<String>> =
+                    args.get("depends_on").and_then(|v| v.as_array()).map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    });
+                let conflicts_with: Option<Vec<String>> = args
+                    .get("conflicts_with")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    });
+                let lock_set: Option<Vec<String>> =
+                    args.get("lock_set").and_then(|v| v.as_array()).map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    });
+                let lock_requirements: Option<Vec<TaskLockRequirement>> = args
+                    .get("lock_requirements")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|item| {
+                                Some(TaskLockRequirement {
+                                    lock_type: item.get("lock_type")?.as_str()?.to_string(),
+                                    resource: item.get("resource")?.as_str()?.to_string(),
+                                })
+                            })
+                            .collect()
+                    });
+                let priority = args.get("priority").and_then(|v| v.as_i64());
+                let risk_level = args.get("risk_level").and_then(|v| v.as_str());
+                let execution_bucket = args.get("execution_bucket").and_then(|v| v.as_str());
+                let estimate_points = args.get("estimate_points").and_then(|v| v.as_i64());
+                let unblock_value = args.get("unblock_value").and_then(|v| v.as_i64());
+                let plan_version = if args.get("plan_version").is_some() {
+                    Some(args.get("plan_version").and_then(|v| v.as_str()))
+                } else {
+                    None
+                };
+                update_task_metadata(
+                    pool,
+                    id,
+                    depends_on.as_deref(),
+                    conflicts_with.as_deref(),
+                    lock_set.as_deref(),
+                    lock_requirements.as_deref(),
+                    priority,
+                    risk_level,
+                    execution_bucket,
+                    estimate_points,
+                    unblock_value,
+                    plan_version,
+                )
+                .await?;
+            }
+
             let task = get_task(pool, id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Task not found: {}", id))?;
             Ok(json!(task))
+        }
+
+        "plan_version_get" | "state_plan_version_get" => {
+            let id = args.get("id").and_then(|v| v.as_str());
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            if let Some(id) = id {
+                Ok(json!(get_plan_version(pool, id).await?))
+            } else {
+                Ok(json!(list_plan_versions(pool, spec).await?))
+            }
+        }
+
+        "plan_version_create" | "state_plan_version_create" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let spec = args
+                .get("spec")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let version = args
+                .get("version")
+                .and_then(|v| v.as_i64())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: version"))?;
+            let reason = args.get("reason").and_then(|v| v.as_str());
+            let plan_json = args
+                .get("plan_json")
+                .map(|v| v.to_string())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: plan_json"))?;
+            let supersede = args
+                .get("supersede_existing")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if supersede {
+                supersede_plan_versions(pool, spec).await?;
+            }
+            Ok(json!(
+                create_plan_version(pool, id, spec, version, reason, &plan_json).await?
+            ))
+        }
+
+        "task_lease_get" | "state_task_lease_get" => {
+            let task = args.get("task").and_then(|v| v.as_str());
+            let status = args.get("status").and_then(|v| v.as_str());
+            if let Some(task) = task {
+                Ok(json!(get_task_lease(pool, task).await?))
+            } else {
+                Ok(json!(list_task_leases(pool, status).await?))
+            }
+        }
+
+        "task_lease_claim" | "state_task_lease_claim" => {
+            let task = args
+                .get("task")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: task"))?;
+            let agent = args
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
+            let ttl = args
+                .get("lease_ttl_seconds")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(1800);
+            Ok(json!(claim_task_lease(pool, task, agent, ttl).await?))
+        }
+
+        "task_lease_heartbeat" | "state_task_lease_heartbeat" => {
+            let task = args
+                .get("task")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: task"))?;
+            let ttl = args
+                .get("lease_ttl_seconds")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(1800);
+            let progress_status = args.get("progress_status").and_then(|v| v.as_str());
+            Ok(json!(
+                heartbeat_task_lease(pool, task, ttl, progress_status).await?
+            ))
+        }
+
+        "task_lease_release" | "state_task_lease_release" => {
+            let task = args
+                .get("task")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: task"))?;
+            let final_status = args.get("final_status").and_then(|v| v.as_str());
+            let released = release_task_lease(pool, task, final_status).await?;
+            let _ = release_task_locks(pool, task).await?;
+            Ok(json!(released))
+        }
+
+        "task_lease_expire" | "state_task_lease_expire" => {
+            Ok(json!(expire_stale_task_leases(pool).await?))
+        }
+
+        "task_lock_query" | "state_task_lock_query" => {
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            let task = args.get("task").and_then(|v| v.as_str());
+            let active_only = args
+                .get("active_only")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            Ok(json!(
+                query_task_locks(pool, spec, task, active_only).await?
+            ))
+        }
+
+        "task_lock_acquire" | "state_task_lock_acquire" => {
+            let task = args
+                .get("task")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: task"))?;
+            let spec = args
+                .get("spec")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let locks_value = args
+                .get("locks")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: locks"))?;
+            let locks: Vec<(String, String)> = locks_value
+                .iter()
+                .filter_map(|item| {
+                    Some((
+                        item.get("lock_type")?.as_str()?.to_string(),
+                        item.get("resource")?.as_str()?.to_string(),
+                    ))
+                })
+                .collect();
+            Ok(json!(acquire_task_locks(pool, task, spec, &locks).await?))
+        }
+
+        "task_lock_release" | "state_task_lock_release" => {
+            let task = args
+                .get("task")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: task"))?;
+            Ok(json!(release_task_locks(pool, task).await?))
+        }
+
+        "replan_request_get" | "state_replan_request_get" => {
+            let id = args.get("id").and_then(|v| v.as_str());
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            let status = args.get("status").and_then(|v| v.as_str());
+            if let Some(id) = id {
+                Ok(json!(get_replan_request(pool, id).await?))
+            } else {
+                Ok(json!(list_replan_requests(pool, spec, status).await?))
+            }
+        }
+
+        "replan_request_create" | "state_replan_request_create" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let spec = args
+                .get("spec")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let agent = args
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
+            let reason = args
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: reason"))?;
+            let task = args.get("task").and_then(|v| v.as_str());
+            let impact: Vec<String> = args
+                .get("impact")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let proposed_action = args.get("proposed_action").and_then(|v| v.as_str());
+            Ok(json!(
+                create_replan_request(
+                    pool,
+                    id,
+                    spec,
+                    task,
+                    agent,
+                    reason,
+                    &impact,
+                    proposed_action
+                )
+                .await?
+            ))
+        }
+
+        "replan_request_update" | "state_replan_request_update" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let status = args
+                .get("status")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: status"))?;
+            Ok(json!(update_replan_request(pool, id, status).await?))
+        }
+
+        "scheduler_next" | "state_scheduler_next" => {
+            let spec = args
+                .get("spec")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let agent = args
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
+            Ok(json!(scheduler_next(pool, spec, agent).await?))
+        }
+
+        "incident_get" | "state_incident_get" => {
+            let id = args.get("id").and_then(|v| v.as_str());
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            let status = args.get("status").and_then(|v| v.as_str());
+            if let Some(id) = id {
+                Ok(json!(get_incident(pool, id).await?))
+            } else {
+                Ok(json!(list_incidents(pool, spec, status).await?))
+            }
+        }
+
+        "incident_create" | "state_incident_create" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let spec = args
+                .get("spec")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let title = args
+                .get("title")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: title"))?;
+            let severity = args
+                .get("severity")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: severity"))?;
+            let source = args
+                .get("source")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: source"))?;
+            let task = args.get("task").and_then(|v| v.as_str());
+            let blocking = args
+                .get("blocking")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let repro_steps = args.get("repro_steps").and_then(|v| v.as_str());
+            Ok(json!(
+                create_incident(
+                    pool,
+                    id,
+                    spec,
+                    task,
+                    title,
+                    severity,
+                    source,
+                    blocking,
+                    repro_steps
+                )
+                .await?
+            ))
+        }
+
+        "incident_update" | "state_incident_update" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let status = args.get("status").and_then(|v| v.as_str());
+            let blocking = args.get("blocking").and_then(|v| v.as_bool());
+            let root_cause = args.get("root_cause").and_then(|v| v.as_str());
+            let fix_strategy = args.get("fix_strategy").and_then(|v| v.as_str());
+            Ok(json!(
+                update_incident(pool, id, status, blocking, root_cause, fix_strategy).await?
+            ))
+        }
+
+        "context_gap_get" | "state_context_gap_get" => {
+            let id = args.get("id").and_then(|v| v.as_str());
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            let status = args.get("status").and_then(|v| v.as_str());
+            if let Some(id) = id {
+                Ok(json!(get_context_gap(pool, id).await?))
+            } else {
+                Ok(json!(list_context_gaps(pool, spec, status).await?))
+            }
+        }
+
+        "context_gap_create" | "state_context_gap_create" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let spec = args
+                .get("spec")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let kind = args
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: kind"))?;
+            let criticality = args
+                .get("criticality")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: criticality"))?;
+            let question = args
+                .get("question")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: question"))?;
+            let task = args.get("task").and_then(|v| v.as_str());
+            let blocking = args
+                .get("blocking")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let assumption = args.get("assumption").and_then(|v| v.as_str());
+            Ok(json!(
+                create_context_gap(
+                    pool,
+                    id,
+                    spec,
+                    task,
+                    kind,
+                    criticality,
+                    blocking,
+                    question,
+                    assumption
+                )
+                .await?
+            ))
+        }
+
+        "context_gap_update" | "state_context_gap_update" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let status = args.get("status").and_then(|v| v.as_str());
+            let blocking = args.get("blocking").and_then(|v| v.as_bool());
+            let assumption = args.get("assumption").and_then(|v| v.as_str());
+            let resolution = args.get("resolution").and_then(|v| v.as_str());
+            Ok(json!(
+                update_context_gap(pool, id, status, blocking, assumption, resolution).await?
+            ))
+        }
+
+        "verification_run_get" | "state_verification_run_get" => {
+            let id = args.get("id").and_then(|v| v.as_str());
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            let task = args.get("task").and_then(|v| v.as_str());
+            let status = args.get("status").and_then(|v| v.as_str());
+            if let Some(id) = id {
+                Ok(json!(get_verification_run(pool, id).await?))
+            } else {
+                Ok(json!(
+                    list_verification_runs(pool, spec, task, status).await?
+                ))
+            }
+        }
+
+        "verification_run_create" | "state_verification_run_create" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let spec = args
+                .get("spec")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let kind = args
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: kind"))?;
+            let status = args
+                .get("status")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: status"))?;
+            let summary = args
+                .get("summary")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: summary"))?;
+            let task = args.get("task").and_then(|v| v.as_str());
+            let slice = args.get("slice").and_then(|v| v.as_str());
+            let command = args.get("command").and_then(|v| v.as_str());
+            let evidence = args.get("evidence").and_then(|v| v.as_str());
+            Ok(json!(
+                create_verification_run(
+                    pool, id, spec, task, slice, kind, status, command, summary, evidence
+                )
+                .await?
+            ))
+        }
+
+        "interrupt_get" | "state_interrupt_get" => {
+            let id = args.get("id").and_then(|v| v.as_str());
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            let status = args.get("status").and_then(|v| v.as_str());
+            if let Some(id) = id {
+                Ok(json!(get_interrupt(pool, id).await?))
+            } else {
+                Ok(json!(list_interrupts(pool, spec, status).await?))
+            }
+        }
+
+        "interrupt_create" | "state_interrupt_create" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let spec = args
+                .get("spec")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let reason_type = args
+                .get("reason_type")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: reason_type"))?;
+            let preempted_tasks: Vec<String> = args
+                .get("preempted_tasks")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let resume_hint = args.get("resume_hint").and_then(|v| v.as_str());
+            Ok(json!(
+                create_interrupt(pool, id, spec, reason_type, &preempted_tasks, resume_hint)
+                    .await?
+            ))
+        }
+
+        "interrupt_update" | "state_interrupt_update" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let status = args.get("status").and_then(|v| v.as_str());
+            let resume_hint = args.get("resume_hint").and_then(|v| v.as_str());
+            Ok(json!(
+                update_interrupt(pool, id, status, resume_hint).await?
+            ))
+        }
+
+        "handoff_snapshot_get" | "state_handoff_snapshot_get" => {
+            let id = args.get("id").and_then(|v| v.as_str());
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            if let Some(id) = id {
+                Ok(json!(get_handoff_snapshot(pool, id).await?))
+            } else {
+                Ok(json!(list_handoff_snapshots(pool, spec).await?))
+            }
+        }
+
+        "handoff_snapshot_create" | "state_handoff_snapshot_create" => {
+            let id = args
+                .get("id")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
+            let spec = args
+                .get("spec")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let interrupt = args.get("interrupt").and_then(|v| v.as_str());
+            let last_wave = args.get("last_wave").and_then(|v| v.as_i64());
+            let last_task = args.get("last_task").and_then(|v| v.as_str());
+            let files_touched: Vec<String> = args
+                .get("files_touched")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let decisions: Vec<String> = args
+                .get("decisions")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let open_risks: Vec<String> = args
+                .get("open_risks")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let next_steps: Vec<String> = args
+                .get("next_steps")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(json!(
+                create_handoff_snapshot(
+                    pool,
+                    id,
+                    spec,
+                    interrupt,
+                    last_wave,
+                    last_task,
+                    &files_touched,
+                    &decisions,
+                    &open_risks,
+                    &next_steps
+                )
+                .await?
+            ))
         }
 
         "event_emit" | "state_event_emit" => {
@@ -734,7 +1494,17 @@ fn build_tools_list() -> Value {
                 "properties": {
                     "id": {"type": "string"},
                     "status": {"type": "string"},
-                    "output_artifact": {"type": "string"}
+                    "output_artifact": {"type": "string"},
+                    "depends_on": {"type": "array", "items": {"type": "string"}},
+                    "conflicts_with": {"type": "array", "items": {"type": "string"}},
+                    "lock_set": {"type": "array", "items": {"type": "string"}},
+                    "lock_requirements": {"type": "array", "items": {"type": "object", "properties": {"lock_type": {"type": "string"}, "resource": {"type": "string"}}, "required": ["lock_type", "resource"]}},
+                    "priority": {"type": "number"},
+                    "risk_level": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                    "execution_bucket": {"type": "string", "enum": ["safe_parallel", "coordinated_parallel", "serialized_only"]},
+                    "estimate_points": {"type": "number"},
+                    "unblock_value": {"type": "number"},
+                    "plan_version": {"type": ["string", "null"]}
                 },
                 "required": ["id"]
             }
@@ -747,7 +1517,17 @@ fn build_tools_list() -> Value {
                 "properties": {
                     "id": {"type": "string"},
                     "status": {"type": "string"},
-                    "output_artifact": {"type": "string"}
+                    "output_artifact": {"type": "string"},
+                    "depends_on": {"type": "array", "items": {"type": "string"}},
+                    "conflicts_with": {"type": "array", "items": {"type": "string"}},
+                    "lock_set": {"type": "array", "items": {"type": "string"}},
+                    "lock_requirements": {"type": "array", "items": {"type": "object", "properties": {"lock_type": {"type": "string"}, "resource": {"type": "string"}}, "required": ["lock_type", "resource"]}},
+                    "priority": {"type": "number"},
+                    "risk_level": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                    "execution_bucket": {"type": "string", "enum": ["safe_parallel", "coordinated_parallel", "serialized_only"]},
+                    "estimate_points": {"type": "number"},
+                    "unblock_value": {"type": "number"},
+                    "plan_version": {"type": ["string", "null"]}
                 },
                 "required": ["id"]
             }
@@ -865,6 +1645,268 @@ fn build_tools_list() -> Value {
                     "agent": {"type": "string"},
                     "type": {"type": "string"}
                 }
+            }
+        },
+        {
+            "name": "state_plan_version_get",
+            "description": "Get a plan version by ID, or list plan versions for a spec.",
+            "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "spec": {"type": "string"}}}
+        },
+        {
+            "name": "state_plan_version_create",
+            "description": "Create a new plan version for a slice/spec.",
+            "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "spec": {"type": "string"}, "version": {"type": "number"}, "reason": {"type": "string"}, "plan_json": {}, "supersede_existing": {"type": "boolean"}}, "required": ["id", "spec", "version", "plan_json"]}
+        },
+        {
+            "name": "state_task_lease_get",
+            "description": "Get a task lease by task ID, or list leases by status.",
+            "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}, "status": {"type": "string"}}}
+        },
+        {
+            "name": "state_task_lease_claim",
+            "description": "Claim a scheduler lease for a ready task.",
+            "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}, "agent": {"type": "string"}, "lease_ttl_seconds": {"type": "number"}}, "required": ["task", "agent"]}
+        },
+        {
+            "name": "state_task_lease_heartbeat",
+            "description": "Refresh an active task lease heartbeat.",
+            "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}, "lease_ttl_seconds": {"type": "number"}, "progress_status": {"type": "string"}}, "required": ["task"]}
+        },
+        {
+            "name": "state_task_lease_release",
+            "description": "Release a task lease and optionally move the task to a final status.",
+            "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}, "final_status": {"type": "string"}}, "required": ["task"]}
+        },
+        {
+            "name": "state_task_lease_expire",
+            "description": "Expire stale active task leases and return them to ready state.",
+            "inputSchema": {"type": "object", "properties": {}}
+        },
+        {
+            "name": "state_task_lock_query",
+            "description": "Query module/semantic/file locks for tasks.",
+            "inputSchema": {"type": "object", "properties": {"spec": {"type": "string"}, "task": {"type": "string"}, "active_only": {"type": "boolean"}}}
+        },
+        {
+            "name": "state_task_lock_acquire",
+            "description": "Acquire module/semantic/file locks for a task.",
+            "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}, "spec": {"type": "string"}, "locks": {"type": "array", "items": {"type": "object", "properties": {"lock_type": {"type": "string", "enum": ["module", "semantic", "file"]}, "resource": {"type": "string"}}, "required": ["lock_type", "resource"]}}}, "required": ["task", "spec", "locks"]}
+        },
+        {
+            "name": "state_task_lock_release",
+            "description": "Release all active locks for a task.",
+            "inputSchema": {"type": "object", "properties": {"task": {"type": "string"}}, "required": ["task"]}
+        },
+        {
+            "name": "state_replan_request_get",
+            "description": "Get a replan request by ID, or list replan requests filtered by spec/status.",
+            "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "spec": {"type": "string"}, "status": {"type": "string"}}}
+        },
+        {
+            "name": "state_replan_request_create",
+            "description": "Create a replan request when execution drifts from the approved plan.",
+            "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "spec": {"type": "string"}, "task": {"type": "string"}, "agent": {"type": "string"}, "reason": {"type": "string"}, "impact": {"type": "array", "items": {"type": "string"}}, "proposed_action": {"type": "string"}}, "required": ["id", "spec", "agent", "reason"]}
+        },
+        {
+            "name": "state_replan_request_update",
+            "description": "Update replan request status.",
+            "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "status": {"type": "string"}}, "required": ["id", "status"]}
+        },
+        {
+            "name": "state_scheduler_next",
+            "description": "Return the next schedulable ready task for an agent within a spec.",
+            "inputSchema": {"type": "object", "properties": {"spec": {"type": "string"}, "agent": {"type": "string"}}, "required": ["spec", "agent"]}
+        },
+        {
+            "name": "state_incident_get",
+            "description": "Get an incident by ID, or list incidents filtered by spec/status.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "status": {"type": "string"}
+                }
+            }
+        },
+        {
+            "name": "state_incident_create",
+            "description": "Create a new incident linked to a spec/task.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "task": {"type": "string"},
+                    "title": {"type": "string"},
+                    "severity": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                    "source": {"type": "string", "enum": ["spec_defect", "implementation_defect", "verification_gap", "documentation_gap", "environment", "unknown"]},
+                    "blocking": {"type": "boolean"},
+                    "repro_steps": {"type": "string"}
+                },
+                "required": ["id", "spec", "title", "severity", "source"]
+            }
+        },
+        {
+            "name": "state_incident_update",
+            "description": "Update incident status, blocking flag, or root-cause notes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"type": "string"},
+                    "blocking": {"type": "boolean"},
+                    "root_cause": {"type": "string"},
+                    "fix_strategy": {"type": "string"}
+                },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "state_context_gap_get",
+            "description": "Get a context gap by ID, or list gaps filtered by spec/status.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "status": {"type": "string"}
+                }
+            }
+        },
+        {
+            "name": "state_context_gap_create",
+            "description": "Create a new context gap for missing or contradictory information.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "task": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["missing_doc", "outdated_doc", "contradictory_doc", "undocumented_behavior"]},
+                    "criticality": {"type": "string", "enum": ["low", "medium", "high"]},
+                    "blocking": {"type": "boolean"},
+                    "question": {"type": "string"},
+                    "assumption": {"type": "string"}
+                },
+                "required": ["id", "spec", "kind", "criticality", "question"]
+            }
+        },
+        {
+            "name": "state_context_gap_update",
+            "description": "Update context-gap status, blocking flag, assumption, or resolution.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"type": "string"},
+                    "blocking": {"type": "boolean"},
+                    "assumption": {"type": "string"},
+                    "resolution": {"type": "string"}
+                },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "state_verification_run_get",
+            "description": "Get a verification run by ID, or list runs filtered by spec/task/status.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "task": {"type": "string"},
+                    "status": {"type": "string"}
+                }
+            }
+        },
+        {
+            "name": "state_verification_run_create",
+            "description": "Record a structured verification run and its evidence.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "task": {"type": "string"},
+                    "slice": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["static", "unit", "integration", "contract", "e2e", "smoke", "migration", "docs", "observability"]},
+                    "status": {"type": "string", "enum": ["pass", "pass_with_risk", "fail", "flaky", "blocked"]},
+                    "command": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "evidence": {"type": "string"}
+                },
+                "required": ["id", "spec", "kind", "status", "summary"]
+            }
+        },
+        {
+            "name": "state_interrupt_get",
+            "description": "Get an interrupt by ID, or list interrupts filtered by spec/status.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "status": {"type": "string"}
+                }
+            }
+        },
+        {
+            "name": "state_interrupt_create",
+            "description": "Create an interrupt record for reprioritized or urgent work.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "reason_type": {"type": "string", "enum": ["emergency", "customer_critical", "revenue", "incident", "strategy", "dependency"]},
+                    "preempted_tasks": {"type": "array", "items": {"type": "string"}},
+                    "resume_hint": {"type": "string"}
+                },
+                "required": ["id", "spec", "reason_type"]
+            }
+        },
+        {
+            "name": "state_interrupt_update",
+            "description": "Update interrupt status or resume hint.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "status": {"type": "string"},
+                    "resume_hint": {"type": "string"}
+                },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "state_handoff_snapshot_get",
+            "description": "Get a handoff snapshot by ID, or list snapshots filtered by spec.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"}
+                }
+            }
+        },
+        {
+            "name": "state_handoff_snapshot_create",
+            "description": "Create a resumable handoff snapshot for interrupted work.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "interrupt": {"type": "string"},
+                    "last_wave": {"type": "number"},
+                    "last_task": {"type": "string"},
+                    "files_touched": {"type": "array", "items": {"type": "string"}},
+                    "decisions": {"type": "array", "items": {"type": "string"}},
+                    "open_risks": {"type": "array", "items": {"type": "string"}},
+                    "next_steps": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["id", "spec"]
             }
         },
         {
