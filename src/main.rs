@@ -1179,10 +1179,6 @@ async fn main() -> Result<()> {
 
         Commands::Mcp { cmd } => match cmd {
             McpCmd::Serve => {
-                use cli::mcp_cmd::resolve_project_dir;
-                let project_dir = resolve_project_dir()?;
-                std::env::set_current_dir(&project_dir)?;
-                let _pool = open_project_db().await?;
                 cmd_mcp_serve().await?;
             }
             McpCmd::Setup { tool, local } => {

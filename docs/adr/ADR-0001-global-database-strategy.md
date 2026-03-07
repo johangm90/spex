@@ -1,4 +1,4 @@
-# ADR-0002: Global Shared Database Strategy — Always-Global, project_dir Partition
+# ADR-0001: Global Shared Database Strategy — Always-Global, project_dir Partition
 
 **Date:** 2026-03-07  
 **Status:** Accepted  
@@ -172,7 +172,7 @@ mode.
 
 | Task | File | Summary |
 |------|------|---------|
-| T05-01 | `docs/adr/ADR-0002-global-database-strategy.md` | This document |
+| T05-01 | `docs/adr/ADR-0001-global-database-strategy.md` | This document |
 | T05-02 | `docs/PRD.md` | Remove per-project non-goal; update Architecture Principle 1 |
 | T05-03 | `migrations/20260308000000_global_project_dir.sql` | Schema migration |
 | T05-04 | `src/sdd/db.rs` | `open_global_db()`, `global_db_path()`, remove per-project fns |
