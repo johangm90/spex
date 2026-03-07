@@ -34,7 +34,7 @@ pub async fn cmd_skill_install(all: bool, tool: &ToolTarget) -> Result<()> {
         tool_name,
     );
 
-    let agent_count = install_bundled_agents(&agents_dir)?;
+    let agent_count = install_bundled_agents(&agents_dir, tool)?;
     println!(
         "{} Installed {} agent files to {} [{}]",
         "✓".green(),
@@ -135,7 +135,7 @@ pub async fn cmd_setup(tool: &ToolTarget, local: bool) -> Result<()> {
         skills_dir.display()
     );
 
-    let agent_count = install_bundled_agents(&agents_dir)?;
+    let agent_count = install_bundled_agents(&agents_dir, tool)?;
     println!(
         "  {} Installed {} agent files → {}",
         "✓".green(),
