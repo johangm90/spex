@@ -101,7 +101,7 @@ fn parse_memory_value(raw: &str) -> Value {
     serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.to_string()))
 }
 
-pub async fn run_mcp_server(pool: Arc<SqlitePool>) -> Result<()> {
+pub async fn run_mcp_server(pool: Arc<SqlitePool>, project_dir: String) -> Result<()> {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let mut reader = BufReader::new(stdin);
@@ -124,7 +124,7 @@ pub async fn run_mcp_server(pool: Arc<SqlitePool>) -> Result<()> {
             Err(e) => JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e)),
             Ok(req) => {
                 let id = req.id.clone();
-                handle_request(&pool, req)
+                handle_request(&pool, &project_dir, req)
                     .await
                     .unwrap_or_else(|e| JsonRpcResponse::error(id, -32603, e.to_string()))
             }
@@ -139,7 +139,7 @@ pub async fn run_mcp_server(pool: Arc<SqlitePool>) -> Result<()> {
     Ok(())
 }
 
-async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRpcResponse> {
+async fn handle_request(pool: &SqlitePool, project_dir: &str, req: JsonRpcRequest) -> Result<JsonRpcResponse> {
     let id = req.id.clone();
 
     match req.method.as_str() {
@@ -179,7 +179,7 @@ async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRp
 
             let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
 
-            let result = dispatch_tool(pool, &tool_name, arguments).await;
+            let result = dispatch_tool(pool, project_dir, &tool_name, arguments).await;
             match result {
                 Ok(value) => Ok(JsonRpcResponse::success(id, tool_content(value))),
                 Err(e) => Ok(JsonRpcResponse::success(
@@ -197,20 +197,20 @@ async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRp
     }
 }
 
-async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Value> {
+async fn dispatch_tool(pool: &SqlitePool, project_dir: &str, name: &str, args: Value) -> Result<Value> {
     match name {
         "state_snapshot" => {
-            let specs = list_specs(pool).await?;
-            let tasks = list_tasks(pool, None).await?;
-            let events = query_events(pool, None, None, None, Some(10), None, None).await?;
-            let incidents = list_incidents(pool, None, None).await?;
-            let context_gaps = list_context_gaps(pool, None, None).await?;
-            let interrupts = list_interrupts(pool, None, None).await?;
-            let verification_runs = list_verification_runs(pool, None, None, None).await?;
-            let active_plan_versions = list_plan_versions(pool, None).await?;
-            let leases = list_task_leases(pool, None).await?;
-            let active_locks = query_task_locks(pool, None, None, true).await?;
-            let open_replans = list_replan_requests(pool, None, Some("open")).await?;
+            let specs = list_specs(pool, project_dir).await?;
+            let tasks = list_tasks(pool, project_dir, None).await?;
+            let events = query_events(pool, project_dir, None, None, None, Some(10), None, None).await?;
+            let incidents = list_incidents(pool, project_dir, None, None).await?;
+            let context_gaps = list_context_gaps(pool, project_dir, None, None).await?;
+            let interrupts = list_interrupts(pool, project_dir, None, None).await?;
+            let verification_runs = list_verification_runs(pool, project_dir, None, None, None).await?;
+            let active_plan_versions = list_plan_versions(pool, project_dir, None).await?;
+            let leases = list_task_leases(pool, project_dir, None).await?;
+            let active_locks = query_task_locks(pool, project_dir, None, None, true).await?;
+            let open_replans = list_replan_requests(pool, project_dir, None, Some("open")).await?;
             let open_incidents: Vec<_> = incidents
                 .iter()
                 .filter(|i| {
@@ -245,8 +245,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .filter(|v| v.status == "fail" || v.status == "blocked" || v.status == "flaky")
                 .cloned()
                 .collect();
-            let project_dir = detect_project_dir();
-            let config_source = detect_config_source(&project_dir);
+            let config_source = detect_config_source(project_dir);
 
             let mut payload = json!({
                 "specs": specs,
@@ -295,10 +294,10 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
         "spec_get" | "state_spec_get" | "slice_get" | "state_slice_get" => {
             let id = args.get("id").and_then(|v| v.as_str());
             if let Some(id) = id {
-                let spec = get_spec(pool, id).await?;
+                let spec = get_spec(pool, project_dir, id).await?;
                 Ok(json!(spec))
             } else {
-                let specs = list_specs(pool).await?;
+                let specs = list_specs(pool, project_dir).await?;
                 Ok(json!(specs))
             }
         }
@@ -326,7 +325,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 })
                 .unwrap_or_default();
 
-            let spec = create_spec(pool, id, title, priority, &depends_on).await?;
+            let spec = create_spec(pool, project_dir, id, title, priority, &depends_on).await?;
 
             // Optionally update agents
             if let Some(agents_arr) = args.get("agents").and_then(|v| v.as_array()) {
@@ -334,7 +333,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                     .iter()
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect();
-                update_spec_agents(pool, id, &agents).await?;
+                update_spec_agents(pool, project_dir, id, &agents).await?;
             }
 
             Ok(json!(spec))
@@ -352,17 +351,17 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .unwrap_or("agent");
 
             if let Some(status) = args.get("status").and_then(|v| v.as_str()) {
-                update_spec_status(pool, id, status, updated_by).await?;
+                update_spec_status(pool, project_dir, id, status, updated_by).await?;
             }
 
             if let Some(ac_total) = args.get("ac_total").and_then(|v| v.as_i64()) {
                 let ac_passed = args.get("ac_passed").and_then(|v| v.as_i64()).unwrap_or(0);
-                update_spec_ac(pool, id, ac_total, ac_passed).await?;
+                update_spec_ac(pool, project_dir, id, ac_total, ac_passed).await?;
             } else if let Some(ac_passed) = args.get("ac_passed").and_then(|v| v.as_i64()) {
-                let spec = get_spec(pool, id)
+                let spec = get_spec(pool, project_dir, id)
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", id))?;
-                update_spec_ac(pool, id, spec.ac_total, ac_passed).await?;
+                update_spec_ac(pool, project_dir, id, spec.ac_total, ac_passed).await?;
             }
 
             if let Some(agents_arr) = args.get("agents").and_then(|v| v.as_array()) {
@@ -370,10 +369,10 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                     .iter()
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect();
-                update_spec_agents(pool, id, &agents).await?;
+                update_spec_agents(pool, project_dir, id, &agents).await?;
             }
 
-            let spec = get_spec(pool, id)
+            let spec = get_spec(pool, project_dir, id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Spec not found: {}", id))?;
             Ok(json!(spec))
@@ -384,10 +383,10 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let spec = args.get("spec").and_then(|v| v.as_str());
 
             if let Some(id) = id {
-                let task = get_task(pool, id).await?;
+                let task = get_task(pool, project_dir, id).await?;
                 Ok(json!(task))
             } else {
-                let tasks = list_tasks(pool, spec).await?;
+                let tasks = list_tasks(pool, project_dir, spec).await?;
                 Ok(json!(tasks))
             }
         }
@@ -481,6 +480,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
 
             let task = create_task(
                 pool,
+                project_dir,
                 id,
                 spec,
                 title,
@@ -509,11 +509,11 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
 
             if let Some(status) = args.get("status").and_then(|v| v.as_str()) {
-                update_task_status(pool, id, status).await?;
+                update_task_status(pool, project_dir, id, status).await?;
             }
 
             if let Some(artifact) = args.get("output_artifact").and_then(|v| v.as_str()) {
-                update_task_output_artifact(pool, id, artifact).await?;
+                update_task_output_artifact(pool, project_dir, id, artifact).await?;
             }
 
             if args.get("depends_on").is_some()
@@ -570,6 +570,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 };
                 update_task_metadata(
                     pool,
+                    project_dir,
                     id,
                     depends_on.as_deref(),
                     conflicts_with.as_deref(),
@@ -585,7 +586,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .await?;
             }
 
-            let task = get_task(pool, id)
+            let task = get_task(pool, project_dir, id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Task not found: {}", id))?;
             Ok(json!(task))
@@ -595,9 +596,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let id = args.get("id").and_then(|v| v.as_str());
             let spec = args.get("spec").and_then(|v| v.as_str());
             if let Some(id) = id {
-                Ok(json!(get_plan_version(pool, id).await?))
+                Ok(json!(get_plan_version(pool, project_dir, id).await?))
             } else {
-                Ok(json!(list_plan_versions(pool, spec).await?))
+                Ok(json!(list_plan_versions(pool, project_dir, spec).await?))
             }
         }
 
@@ -624,10 +625,10 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             if supersede {
-                supersede_plan_versions(pool, spec).await?;
+                supersede_plan_versions(pool, project_dir, spec).await?;
             }
             Ok(json!(
-                create_plan_version(pool, id, spec, version, reason, &plan_json).await?
+                create_plan_version(pool, project_dir, id, spec, version, reason, &plan_json).await?
             ))
         }
 
@@ -635,9 +636,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let task = args.get("task").and_then(|v| v.as_str());
             let status = args.get("status").and_then(|v| v.as_str());
             if let Some(task) = task {
-                Ok(json!(get_task_lease(pool, task).await?))
+                Ok(json!(get_task_lease(pool, project_dir, task).await?))
             } else {
-                Ok(json!(list_task_leases(pool, status).await?))
+                Ok(json!(list_task_leases(pool, project_dir, status).await?))
             }
         }
 
@@ -654,7 +655,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .get("lease_ttl_seconds")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(1800);
-            Ok(json!(claim_task_lease(pool, task, agent, ttl).await?))
+            Ok(json!(claim_task_lease(pool, project_dir, task, agent, ttl).await?))
         }
 
         "task_lease_heartbeat" | "state_task_lease_heartbeat" => {
@@ -668,7 +669,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .unwrap_or(1800);
             let progress_status = args.get("progress_status").and_then(|v| v.as_str());
             Ok(json!(
-                heartbeat_task_lease(pool, task, ttl, progress_status).await?
+                heartbeat_task_lease(pool, project_dir, task, ttl, progress_status).await?
             ))
         }
 
@@ -678,13 +679,13 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Missing field: task"))?;
             let final_status = args.get("final_status").and_then(|v| v.as_str());
-            let released = release_task_lease(pool, task, final_status).await?;
-            let _ = release_task_locks(pool, task).await?;
+            let released = release_task_lease(pool, project_dir, task, final_status).await?;
+            let _ = release_task_locks(pool, project_dir, task).await?;
             Ok(json!(released))
         }
 
         "task_lease_expire" | "state_task_lease_expire" => {
-            Ok(json!(expire_stale_task_leases(pool).await?))
+            Ok(json!(expire_stale_task_leases(pool, project_dir).await?))
         }
 
         "task_lock_query" | "state_task_lock_query" => {
@@ -695,7 +696,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
             Ok(json!(
-                query_task_locks(pool, spec, task, active_only).await?
+                query_task_locks(pool, project_dir, spec, task, active_only).await?
             ))
         }
 
@@ -721,7 +722,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                     ))
                 })
                 .collect();
-            Ok(json!(acquire_task_locks(pool, task, spec, &locks).await?))
+            Ok(json!(acquire_task_locks(pool, project_dir, task, spec, &locks).await?))
         }
 
         "task_lock_release" | "state_task_lock_release" => {
@@ -729,7 +730,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .get("task")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Missing field: task"))?;
-            Ok(json!(release_task_locks(pool, task).await?))
+            Ok(json!(release_task_locks(pool, project_dir, task).await?))
         }
 
         "replan_request_get" | "state_replan_request_get" => {
@@ -737,9 +738,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let spec = args.get("spec").and_then(|v| v.as_str());
             let status = args.get("status").and_then(|v| v.as_str());
             if let Some(id) = id {
-                Ok(json!(get_replan_request(pool, id).await?))
+                Ok(json!(get_replan_request(pool, project_dir, id).await?))
             } else {
-                Ok(json!(list_replan_requests(pool, spec, status).await?))
+                Ok(json!(list_replan_requests(pool, project_dir, spec, status).await?))
             }
         }
 
@@ -774,6 +775,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(
                 create_replan_request(
                     pool,
+                    project_dir,
                     id,
                     spec,
                     task,
@@ -795,7 +797,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .get("status")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Missing field: status"))?;
-            Ok(json!(update_replan_request(pool, id, status).await?))
+            Ok(json!(update_replan_request(pool, project_dir, id, status).await?))
         }
 
         "scheduler_next" | "state_scheduler_next" => {
@@ -807,7 +809,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .get("agent")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
-            Ok(json!(scheduler_next(pool, spec, agent).await?))
+            Ok(json!(scheduler_next(pool, project_dir, spec, agent).await?))
         }
 
         "incident_get" | "state_incident_get" => {
@@ -815,9 +817,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let spec = args.get("spec").and_then(|v| v.as_str());
             let status = args.get("status").and_then(|v| v.as_str());
             if let Some(id) = id {
-                Ok(json!(get_incident(pool, id).await?))
+                Ok(json!(get_incident(pool, project_dir, id).await?))
             } else {
-                Ok(json!(list_incidents(pool, spec, status).await?))
+                Ok(json!(list_incidents(pool, project_dir, spec, status).await?))
             }
         }
 
@@ -851,6 +853,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(
                 create_incident(
                     pool,
+                    project_dir,
                     id,
                     spec,
                     task,
@@ -874,7 +877,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let root_cause = args.get("root_cause").and_then(|v| v.as_str());
             let fix_strategy = args.get("fix_strategy").and_then(|v| v.as_str());
             Ok(json!(
-                update_incident(pool, id, status, blocking, root_cause, fix_strategy).await?
+                update_incident(pool, project_dir, id, status, blocking, root_cause, fix_strategy).await?
             ))
         }
 
@@ -883,9 +886,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let spec = args.get("spec").and_then(|v| v.as_str());
             let status = args.get("status").and_then(|v| v.as_str());
             if let Some(id) = id {
-                Ok(json!(get_context_gap(pool, id).await?))
+                Ok(json!(get_context_gap(pool, project_dir, id).await?))
             } else {
-                Ok(json!(list_context_gaps(pool, spec, status).await?))
+                Ok(json!(list_context_gaps(pool, project_dir, spec, status).await?))
             }
         }
 
@@ -919,6 +922,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(
                 create_context_gap(
                     pool,
+                    project_dir,
                     id,
                     spec,
                     task,
@@ -942,7 +946,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let assumption = args.get("assumption").and_then(|v| v.as_str());
             let resolution = args.get("resolution").and_then(|v| v.as_str());
             Ok(json!(
-                update_context_gap(pool, id, status, blocking, assumption, resolution).await?
+                update_context_gap(pool, project_dir, id, status, blocking, assumption, resolution).await?
             ))
         }
 
@@ -952,10 +956,10 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let task = args.get("task").and_then(|v| v.as_str());
             let status = args.get("status").and_then(|v| v.as_str());
             if let Some(id) = id {
-                Ok(json!(get_verification_run(pool, id).await?))
+                Ok(json!(get_verification_run(pool, project_dir, id).await?))
             } else {
                 Ok(json!(
-                    list_verification_runs(pool, spec, task, status).await?
+                    list_verification_runs(pool, project_dir, spec, task, status).await?
                 ))
             }
         }
@@ -987,7 +991,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let evidence = args.get("evidence").and_then(|v| v.as_str());
             Ok(json!(
                 create_verification_run(
-                    pool, id, spec, task, slice, kind, status, command, summary, evidence
+                    pool, project_dir, id, spec, task, slice, kind, status, command, summary, evidence
                 )
                 .await?
             ))
@@ -998,9 +1002,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let spec = args.get("spec").and_then(|v| v.as_str());
             let status = args.get("status").and_then(|v| v.as_str());
             if let Some(id) = id {
-                Ok(json!(get_interrupt(pool, id).await?))
+                Ok(json!(get_interrupt(pool, project_dir, id).await?))
             } else {
-                Ok(json!(list_interrupts(pool, spec, status).await?))
+                Ok(json!(list_interrupts(pool, project_dir, spec, status).await?))
             }
         }
 
@@ -1028,7 +1032,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .unwrap_or_default();
             let resume_hint = args.get("resume_hint").and_then(|v| v.as_str());
             Ok(json!(
-                create_interrupt(pool, id, spec, reason_type, &preempted_tasks, resume_hint)
+                create_interrupt(pool, project_dir, id, spec, reason_type, &preempted_tasks, resume_hint)
                     .await?
             ))
         }
@@ -1041,7 +1045,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let status = args.get("status").and_then(|v| v.as_str());
             let resume_hint = args.get("resume_hint").and_then(|v| v.as_str());
             Ok(json!(
-                update_interrupt(pool, id, status, resume_hint).await?
+                update_interrupt(pool, project_dir, id, status, resume_hint).await?
             ))
         }
 
@@ -1049,9 +1053,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let id = args.get("id").and_then(|v| v.as_str());
             let spec = args.get("spec").and_then(|v| v.as_str());
             if let Some(id) = id {
-                Ok(json!(get_handoff_snapshot(pool, id).await?))
+                Ok(json!(get_handoff_snapshot(pool, project_dir, id).await?))
             } else {
-                Ok(json!(list_handoff_snapshots(pool, spec).await?))
+                Ok(json!(list_handoff_snapshots(pool, project_dir, spec).await?))
             }
         }
 
@@ -1106,6 +1110,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(
                 create_handoff_snapshot(
                     pool,
+                    project_dir,
                     id,
                     spec,
                     interrupt,
@@ -1132,7 +1137,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "{}".to_string());
 
-            emit_event(pool, event_type, spec, agent, &payload).await?;
+            emit_event(pool, project_dir, event_type, spec, agent, &payload).await?;
             Ok(json!({"ok": true}))
         }
 
@@ -1146,6 +1151,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
 
             let events = query_events(
                 pool,
+                project_dir,
                 type_filter,
                 spec_filter,
                 agent_filter,
@@ -1174,7 +1180,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let mem_type = args.get("type").and_then(|v| v.as_str());
             let ttl_seconds = args.get("ttl_seconds").and_then(|v| v.as_i64());
 
-            memory_set(pool, agent, key, &value, spec, mem_type, ttl_seconds).await?;
+            memory_set(pool, project_dir, agent, key, &value, spec, mem_type, ttl_seconds).await?;
             Ok(json!({"ok": true}))
         }
 
@@ -1187,7 +1193,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let spec = args.get("spec").and_then(|v| v.as_str());
 
             if let Some(key) = key {
-                let memory = memory_get_full(pool, agent, key, spec).await?;
+                let memory = memory_get_full(pool, project_dir, agent, key, spec).await?;
                 if let Some(m) = memory {
                     let value = parse_memory_value(&m.value);
                     Ok(json!({
@@ -1203,7 +1209,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                     Ok(json!({"value": null}))
                 }
             } else {
-                let entries = memory_get_all(pool, agent, spec).await?;
+                let entries = memory_get_all(pool, project_dir, agent, spec).await?;
                 let entries_obj: Vec<Value> = entries
                     .into_iter()
                     .map(|(k, v)| json!({"key": k, "value": parse_memory_value(&v)}))
@@ -1235,6 +1241,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
 
             let artifact = register_artifact(
                 pool,
+                project_dir,
                 id,
                 spec,
                 task,
@@ -1253,14 +1260,13 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let agent = args.get("agent").and_then(|v| v.as_str());
             let artifact_type = args.get("type").and_then(|v| v.as_str());
 
-            let artifacts = query_artifacts(pool, spec, task, agent, artifact_type).await?;
+            let artifacts = query_artifacts(pool, project_dir, spec, task, agent, artifact_type).await?;
             Ok(json!(artifacts))
         }
 
         "constitution_get" | "state_constitution_get" | "prd_get" | "state_prd_get" => {
             // Read docs/PRD.md (source of truth is the file, not the DB)
-            let project_dir = detect_project_dir();
-            let prd_path = std::path::Path::new(&project_dir)
+            let prd_path = std::path::Path::new(project_dir)
                 .join("docs")
                 .join("PRD.md");
             let (content, exists) = if prd_path.exists() {
@@ -1294,7 +1300,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let mem_type = args.get("type").and_then(|v| v.as_str());
             let limit = args.get("limit").and_then(|v| v.as_i64());
 
-            let results = memory_search(pool, agent, query_str, spec, mem_type, limit).await?;
+            let results = memory_search(pool, project_dir, agent, query_str, spec, mem_type, limit).await?;
             Ok(json!(results))
         }
 
@@ -1309,7 +1315,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .ok_or_else(|| anyhow::anyhow!("Missing field: key"))?;
             let spec = args.get("spec").and_then(|v| v.as_str());
 
-            let deleted = memory_delete(pool, agent, key, spec).await?;
+            let deleted = memory_delete(pool, project_dir, agent, key, spec).await?;
             Ok(json!({"deleted": deleted}))
         }
 
@@ -1321,7 +1327,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let spec = args.get("spec").and_then(|v| v.as_str());
             let limit = args.get("limit").and_then(|v| v.as_i64());
 
-            let entries = memory_context(pool, agent, spec, limit).await?;
+            let entries = memory_context(pool, project_dir, agent, spec, limit).await?;
             Ok(json!(entries))
         }
 
@@ -1332,7 +1338,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
             let spec = args.get("spec").and_then(|v| v.as_str());
 
-            let stats = memory_stats(pool, agent, spec).await?;
+            let stats = memory_stats(pool, project_dir, agent, spec).await?;
             Ok(stats)
         }
 
