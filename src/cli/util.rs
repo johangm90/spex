@@ -9,6 +9,11 @@ pub fn opencode_config_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".config").join("opencode"))
 }
 
+/// Returns ~/.copilot (GitHub Copilot CLI config directory).
+pub fn copilot_config_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".copilot"))
+}
+
 pub fn colorize_status(status: &str) -> ColoredString {
     match status {
         "draft" => status.white(),

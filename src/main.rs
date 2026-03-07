@@ -5,6 +5,8 @@ mod mcp;
 mod scaffold;
 mod sdd;
 mod skills_mgr;
+pub mod tool_target;
+pub use tool_target::ToolTarget;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -40,6 +42,13 @@ use cli::{
 };
 use sdd::db::open_project_db;
 
+fn parse_tool_target(s: &str) -> ToolTarget {
+    match s.to_ascii_lowercase().as_str() {
+        "copilot" | "copilot-cli" | "gh-copilot" => ToolTarget::CopilotCli,
+        _ => ToolTarget::OpenCode,
+    }
+}
+
 // ─── CLI Structures ──────────────────────────────────────────────────────────
 
 #[derive(Parser)]
@@ -61,9 +70,12 @@ pub enum Commands {
 
     /// One-time global setup: install agent skills and write MCP config
     Setup {
-        /// Write MCP config to global ~/.config/opencode/config.json instead of ./opencode.json
+        /// Target AI tool: opencode (default) or copilot
+        #[arg(long, default_value = "opencode")]
+        tool: String,
+        /// Write to local per-project config instead of global
         #[arg(long)]
-        global: bool,
+        local: bool,
     },
 
     /// Bootstrap a new spex project
@@ -211,6 +223,7 @@ pub enum PlanCmd {
 
 // ─── Task Subcommands ─────────────────────────────────────────────────────────
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 pub enum TaskCmd {
     /// Add a task to a spec
@@ -579,8 +592,12 @@ pub enum McpCmd {
     Serve,
     /// Write opencode.json MCP config
     Setup {
+        /// Target AI tool: opencode (default) or copilot
+        #[arg(long, default_value = "opencode")]
+        tool: String,
+        /// Write to local per-project config instead of global
         #[arg(long)]
-        global: bool,
+        local: bool,
     },
 }
 
@@ -592,6 +609,9 @@ pub enum SkillCmd {
     Install {
         #[arg(long)]
         all: bool,
+        /// Target AI tool: opencode (default) or copilot
+        #[arg(long, default_value = "opencode")]
+        tool: String,
     },
     /// List installed skills
     List,
@@ -609,8 +629,8 @@ async fn main() -> Result<()> {
             scaffold::init_project(&cwd).await?;
         }
 
-        Commands::Setup { global } => {
-            cmd_setup(global).await?;
+        Commands::Setup { tool, local } => {
+            cmd_setup(&parse_tool_target(&tool), local).await?;
         }
 
         Commands::New { name, yes } => {
@@ -1055,16 +1075,21 @@ async fn main() -> Result<()> {
 
         Commands::Mcp { cmd } => match cmd {
             McpCmd::Serve => {
+                use cli::mcp_cmd::resolve_project_dir;
+                let project_dir = resolve_project_dir()?;
+                std::env::set_current_dir(&project_dir)?;
                 let pool = open_project_db().await?;
                 cmd_mcp_serve(pool).await?;
             }
-            McpCmd::Setup { global } => {
-                cmd_mcp_setup(global)?;
+            McpCmd::Setup { tool, local } => {
+                cmd_mcp_setup(&parse_tool_target(&tool), local)?;
             }
         },
 
         Commands::Skill { cmd } => match cmd {
-            SkillCmd::Install { all } => cmd_skill_install(all).await?,
+            SkillCmd::Install { all, tool } => {
+                cmd_skill_install(all, &parse_tool_target(&tool)).await?
+            }
             SkillCmd::List => cmd_skill_list()?,
         },
 

@@ -3,6 +3,40 @@ use colored::Colorize;
 use std::path::Path;
 
 use crate::sdd::db::{ensure_spex_dir, get_db_path, open_db};
+use crate::tool_target::ToolTarget;
+
+/// Write the spex-state MCP entry into each detected tool's global config file.
+/// Returns the list of tools that were successfully written (or already had the entry).
+fn write_global_mcp_configs(tools: &[ToolTarget]) -> Vec<(ToolTarget, std::path::PathBuf, bool)> {
+    let mut results = Vec::new();
+    for tool in tools {
+        if let Some(config_path) = tool.global_mcp_config_path() {
+            // Load existing JSON if the file exists
+            let existing = if config_path.exists() {
+                std::fs::read_to_string(&config_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or(serde_json::json!({}))
+            } else {
+                serde_json::json!({})
+            };
+
+            let (updated, changed) = tool.merge_mcp_config(existing);
+
+            // Ensure parent directory exists
+            if let Some(parent) = config_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+
+            if let Ok(json_str) = serde_json::to_string_pretty(&updated) {
+                let _ = std::fs::write(&config_path, json_str);
+            }
+
+            results.push((tool.clone(), config_path, changed));
+        }
+    }
+    results
+}
 
 pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
     if !yes {
@@ -60,7 +94,17 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
         println!("  {} docs/PRD.md", "created".green());
     }
 
-    // 6. Create opencode.json with MCP config (correct OpenCode format)
+    // 6. Write global MCP config for all detected tools (graceful fallback to OpenCode)
+    let detected = ToolTarget::detect_installed();
+    let tools: Vec<ToolTarget> = if detected.is_empty() {
+        vec![ToolTarget::OpenCode]
+    } else {
+        detected
+    };
+
+    let written = write_global_mcp_configs(&tools);
+
+    // 7. Write per-project opencode.json (OpenCode only — backward compat convenience copy)
     let opencode_path = dir.join("opencode.json");
     if !opencode_path.exists() {
         let config = serde_json::json!({
@@ -69,10 +113,21 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
             }
         });
         std::fs::write(&opencode_path, serde_json::to_string_pretty(&config)?)?;
-        println!("  {} opencode.json", "created".green());
+
+        // Find global path to display in the message
+        let global_path = ToolTarget::OpenCode
+            .global_mcp_config_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "~/.config/opencode/config.json".to_string());
+
+        println!(
+            "  {} opencode.json (local copy; global config at {} is the primary)",
+            "created".green(),
+            global_path.cyan()
+        );
     }
 
-    // 7. Initialize the SQLite database (runs migrations)
+    // 8. Initialize the SQLite database (runs migrations)
     let db_path = get_db_path(dir);
     let _pool = open_db(&db_path).await?;
     println!("  {} .spex/state.db", "created".green());
@@ -80,6 +135,19 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
     println!();
     println!("{} Project {} created!", "✓".green().bold(), name.cyan());
     println!();
+
+    // Print project isolation note
+    println!(
+        "{}  Project isolation: spex mcp serve reads .spex/state.db from the directory where your",
+        "ℹ".blue()
+    );
+    println!(
+        "   tool is launched. Set {}={} in the MCP config env if needed.",
+        "SPEX_PROJECT_DIR".cyan(),
+        "<path>".dimmed()
+    );
+    println!();
+
     println!("Next steps:");
     println!(
         "  {} Fill in the PRD:          {}",
@@ -97,10 +165,18 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
         "spex pulse".cyan()
     );
     println!();
-    println!(
-        "  MCP config written to {}. Open OpenCode — the orchestrator will help you fill docs/PRD.md.",
-        "opencode.json".cyan()
-    );
+
+    // Build "MCP config written for" summary line
+    let tool_labels: Vec<String> = written
+        .iter()
+        .map(|(tool, _, _)| format!("{} (global)", tool.display_name()))
+        .collect();
+    if !tool_labels.is_empty() {
+        println!(
+            "  MCP config written for: {}",
+            tool_labels.join(", ").cyan()
+        );
+    }
     println!(
         "  {}",
         "Tip: run `spex setup` once to install agent skills globally.".dimmed()
@@ -162,7 +238,17 @@ pub async fn init_project(dir: &Path) -> Result<()> {
         println!("  {} docs/PRD.md already exists", "skipped".dimmed());
     }
 
-    // 4. Merge spex-state into opencode.json (correct OpenCode format; never overwrite existing keys)
+    // 4. Write global MCP config for all detected tools (graceful fallback to OpenCode)
+    let detected = ToolTarget::detect_installed();
+    let tools: Vec<ToolTarget> = if detected.is_empty() {
+        vec![ToolTarget::OpenCode]
+    } else {
+        detected
+    };
+
+    let written = write_global_mcp_configs(&tools);
+
+    // 5. Write per-project opencode.json (OpenCode only — backward compat convenience copy)
     let opencode_path = dir.join("opencode.json");
     if opencode_path.exists() {
         let raw = std::fs::read_to_string(&opencode_path)?;
@@ -190,10 +276,20 @@ pub async fn init_project(dir: &Path) -> Result<()> {
             }
         });
         std::fs::write(&opencode_path, serde_json::to_string_pretty(&config)?)?;
-        println!("  {} opencode.json", "created".green());
+
+        let global_path = ToolTarget::OpenCode
+            .global_mcp_config_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "~/.config/opencode/config.json".to_string());
+
+        println!(
+            "  {} opencode.json (local copy; global config at {} is the primary)",
+            "created".green(),
+            global_path.cyan()
+        );
     }
 
-    // 5. Initialise the SQLite database (runs migrations)
+    // 6. Initialise the SQLite database (runs migrations)
     let db_path = get_db_path(dir);
     let _pool = open_db(&db_path).await?;
     println!("  {} .spex/state.db", "created".green());
@@ -205,6 +301,19 @@ pub async fn init_project(dir: &Path) -> Result<()> {
         dir.display().to_string().cyan()
     );
     println!();
+
+    // Print project isolation note
+    println!(
+        "{}  Project isolation: spex mcp serve reads .spex/state.db from the directory where your",
+        "ℹ".blue()
+    );
+    println!(
+        "   tool is launched. Set {}={} in the MCP config env if needed.",
+        "SPEX_PROJECT_DIR".cyan(),
+        "<path>".dimmed()
+    );
+    println!();
+
     println!("Next steps:");
     println!(
         "  {}  Fill in the PRD:        {}",
@@ -217,10 +326,18 @@ pub async fn init_project(dir: &Path) -> Result<()> {
         "spex spec add SPEC-001 \"My first feature\"".cyan()
     );
     println!();
-    println!(
-        "  MCP entry written to {}. Open OpenCode — the orchestrator will help you fill docs/PRD.md.",
-        "opencode.json".cyan()
-    );
+
+    // Build "MCP config written for" summary line
+    let tool_labels: Vec<String> = written
+        .iter()
+        .map(|(tool, _, _)| format!("{} (global)", tool.display_name()))
+        .collect();
+    if !tool_labels.is_empty() {
+        println!(
+            "  MCP config written for: {}",
+            tool_labels.join(", ").cyan()
+        );
+    }
     println!(
         "  {}",
         "Tip: run `spex setup` once to install agent skills globally.".dimmed()
@@ -231,12 +348,9 @@ pub async fn init_project(dir: &Path) -> Result<()> {
 
 /// Canonical OpenCode MCP server entry.
 /// Uses the array-command format with type and enabled fields per OpenCode docs.
+/// Delegates to `ToolTarget::OpenCode.mcp_entry_json()` for consistency.
 pub fn mcp_entry_json() -> serde_json::Value {
-    serde_json::json!({
-        "type": "local",
-        "enabled": true,
-        "command": ["spex", "mcp", "serve"]
-    })
+    ToolTarget::OpenCode.mcp_entry_json()
 }
 
 /// Default PRD template written to docs/PRD.md on project creation.

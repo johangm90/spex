@@ -1,3 +1,5 @@
+use crate::tool_target::ToolTarget;
+
 pub enum CheckStatus {
     Pass,
     Warn,
@@ -11,27 +13,33 @@ pub struct CheckResult {
 }
 
 pub async fn run_checks() -> Vec<CheckResult> {
-    let mut results = vec![];
-
     // 1. .spex/state.db exists and is readable
-    results.push(check_state_db());
-
     // 2. PRD.md exists and is not the default template
-    results.push(check_prd());
-
     // 3. ~/.config/opencode/skills/ exists
-    results.push(check_skills_dir());
-
     // 4. At least one skill is installed
-    results.push(check_skills_installed());
+    // 5. OpenCode MCP entry in global or local config
+    let mut results = vec![
+        check_state_db(),
+        check_prd(),
+        check_skills_dir(),
+        check_skills_installed(),
+        check_opencode_mcp(),
+    ];
 
-    // 5. opencode.json exists in current dir with spex-state MCP entry
-    results.push(check_opencode_json());
+    // 6. Copilot CLI checks (only if ~/.copilot exists)
+    if ToolTarget::CopilotCli
+        .config_dir()
+        .map(|d| d.exists())
+        .unwrap_or(false)
+    {
+        results.push(check_copilot_cli_mcp());
+        results.push(check_copilot_cli_skills());
+    }
 
-    // 6. Git repo detected
+    // 7. Git repo detected
     results.push(check_git_repo());
 
-    // 7. No specs stuck in in_progress
+    // 8. No specs stuck in in_progress
     results.push(check_stuck_specs().await);
 
     results
@@ -159,40 +167,149 @@ fn check_skills_installed() -> CheckResult {
     }
 }
 
-fn check_opencode_json() -> CheckResult {
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let path = cwd.join("opencode.json");
-    if !path.exists() {
+/// Check whether the spex-state MCP entry exists in either:
+///   - Global OpenCode config: ~/.config/opencode/config.json
+///   - Local OpenCode config:  ./opencode.json
+fn check_opencode_mcp() -> CheckResult {
+    let global_path = ToolTarget::OpenCode.global_mcp_config_path();
+    let local_path = ToolTarget::OpenCode.local_mcp_config_path();
+
+    // Helper: does this file contain "spex-state"?
+    let has_entry = |path: &std::path::Path| -> bool {
+        std::fs::read_to_string(path)
+            .map(|c| c.contains("spex-state"))
+            .unwrap_or(false)
+    };
+
+    if let Some(ref p) = global_path {
+        if p.exists() && has_entry(p) {
+            return CheckResult {
+                name: "OpenCode MCP".to_string(),
+                status: CheckStatus::Pass,
+                message: format!("MCP entry found in {}", p.display()),
+            };
+        }
+    }
+
+    if let Some(ref p) = local_path {
+        if p.exists() && has_entry(p) {
+            return CheckResult {
+                name: "OpenCode MCP".to_string(),
+                status: CheckStatus::Pass,
+                message: format!("MCP entry found in {}", p.display()),
+            };
+        }
+    }
+
+    CheckResult {
+        name: "OpenCode MCP".to_string(),
+        status: CheckStatus::Warn,
+        message: "Neither ~/.config/opencode/config.json nor ./opencode.json has spex-state. Run `spex mcp setup`.".to_string(),
+    }
+}
+
+/// Check whether ~/.copilot/mcp-config.json contains the spex-state MCP entry.
+/// Only call this when ~/.copilot/ exists.
+fn check_copilot_cli_mcp() -> CheckResult {
+    let mcp_path = match ToolTarget::CopilotCli.global_mcp_config_path() {
+        Some(p) => p,
+        None => {
+            return CheckResult {
+                name: "Copilot CLI MCP".to_string(),
+                status: CheckStatus::Warn,
+                message: "Cannot determine Copilot CLI config path.".to_string(),
+            };
+        }
+    };
+
+    if !mcp_path.exists() {
         return CheckResult {
-            name: "opencode.json".to_string(),
+            name: "Copilot CLI MCP".to_string(),
             status: CheckStatus::Warn,
-            message: "opencode.json not found. Run `spex mcp setup`.".to_string(),
+            message: "Copilot CLI detected but mcp-config.json not found. Run `spex mcp setup --tool copilot-cli`.".to_string(),
         };
     }
 
-    match std::fs::read_to_string(&path) {
+    match std::fs::read_to_string(&mcp_path) {
         Err(e) => CheckResult {
-            name: "opencode.json".to_string(),
+            name: "Copilot CLI MCP".to_string(),
             status: CheckStatus::Fail,
-            message: format!("Cannot read opencode.json: {}", e),
+            message: format!("Cannot read mcp-config.json: {}", e),
         },
         Ok(content) => {
-            let has_spex = content.contains("spex-state");
-            if has_spex {
+            if content.contains("spex-state") {
                 CheckResult {
-                    name: "opencode.json".to_string(),
+                    name: "Copilot CLI MCP".to_string(),
                     status: CheckStatus::Pass,
-                    message: "MCP entry found (spex-state).".to_string(),
+                    message: "Copilot CLI MCP entry found.".to_string(),
                 }
             } else {
                 CheckResult {
-                    name: "opencode.json".to_string(),
+                    name: "Copilot CLI MCP".to_string(),
                     status: CheckStatus::Warn,
-                    message:
-                        "opencode.json exists but missing spex-state entry. Run `spex mcp setup`."
-                            .to_string(),
+                    message: "mcp-config.json missing spex-state entry. Run `spex mcp setup --tool copilot-cli`.".to_string(),
                 }
             }
+        }
+    }
+}
+
+/// Check whether ~/.copilot/skills/ contains spex-* skill directories.
+/// Only call this when ~/.copilot/ exists.
+fn check_copilot_cli_skills() -> CheckResult {
+    let skills_dir = match ToolTarget::CopilotCli.skills_dir() {
+        Some(d) => d,
+        None => {
+            return CheckResult {
+                name: "Copilot CLI skills".to_string(),
+                status: CheckStatus::Warn,
+                message: "Cannot determine Copilot CLI skills path.".to_string(),
+            };
+        }
+    };
+
+    if !skills_dir.exists() {
+        return CheckResult {
+            name: "Copilot CLI skills".to_string(),
+            status: CheckStatus::Warn,
+            message: "Copilot CLI skills not installed. Run `spex skill install --all --tool copilot-cli`.".to_string(),
+        };
+    }
+
+    let spex_skills: Vec<_> = match std::fs::read_dir(&skills_dir) {
+        Err(_) => {
+            return CheckResult {
+                name: "Copilot CLI skills".to_string(),
+                status: CheckStatus::Warn,
+                message: "Copilot CLI skills not installed. Run `spex skill install --all --tool copilot-cli`.".to_string(),
+            };
+        }
+        Ok(rd) => rd
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .map(|n| n.starts_with("spex-"))
+                    .unwrap_or(false)
+                    && e.path().is_dir()
+            })
+            .collect(),
+    };
+
+    if spex_skills.is_empty() {
+        CheckResult {
+            name: "Copilot CLI skills".to_string(),
+            status: CheckStatus::Warn,
+            message: "Copilot CLI skills not installed. Run `spex skill install --all --tool copilot-cli`.".to_string(),
+        }
+    } else {
+        CheckResult {
+            name: "Copilot CLI skills".to_string(),
+            status: CheckStatus::Pass,
+            message: format!(
+                "{} spex skill(s) found in ~/.copilot/skills/",
+                spex_skills.len()
+            ),
         }
     }
 }
@@ -324,23 +441,101 @@ pub async fn fix_issues() -> Vec<(String, String)> {
         }
     }
 
-    // Fix 4: Create opencode.json with MCP entry if missing
-    let opencode_path = cwd.join("opencode.json");
-    if !opencode_path.exists() {
-        let config = serde_json::json!({
-            "mcp": {
-                "spex-state": crate::scaffold::mcp_entry_json()
+    // Fix 4: Write global OpenCode config (~/.config/opencode/config.json) and local ./opencode.json
+    // with the spex-state MCP entry if either is missing.
+    let mcp_entry = ToolTarget::OpenCode.mcp_entry_json();
+
+    // 4a: Global config
+    if let Some(global_config_path) = ToolTarget::OpenCode.global_mcp_config_path() {
+        let needs_fix = if global_config_path.exists() {
+            std::fs::read_to_string(&global_config_path)
+                .map(|c| !c.contains("spex-state"))
+                .unwrap_or(true)
+        } else {
+            true
+        };
+
+        if needs_fix {
+            // Load existing or start fresh
+            let existing: serde_json::Value = global_config_path
+                .exists()
+                .then(|| {
+                    std::fs::read_to_string(&global_config_path)
+                        .ok()
+                        .and_then(|s| serde_json::from_str(&s).ok())
+                })
+                .flatten()
+                .unwrap_or(serde_json::json!({}));
+
+            let (updated, _) = ToolTarget::OpenCode.merge_mcp_config(existing);
+
+            // Ensure parent directory exists
+            if let Some(parent) = global_config_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
             }
-        });
-        match serde_json::to_string_pretty(&config) {
-            Ok(json_str) => match std::fs::write(&opencode_path, json_str) {
+
+            match serde_json::to_string_pretty(&updated) {
+                Ok(json_str) => match std::fs::write(&global_config_path, json_str) {
+                    Ok(_) => results.push((
+                        "OpenCode MCP".to_string(),
+                        format!(
+                            "Wrote spex-state MCP entry to {}",
+                            global_config_path.display()
+                        ),
+                    )),
+                    Err(e) => results.push((
+                        "OpenCode MCP".to_string(),
+                        format!(
+                            "Could not write {}: {}",
+                            global_config_path.display(),
+                            e
+                        ),
+                    )),
+                },
+                Err(e) => results.push((
+                    "OpenCode MCP".to_string(),
+                    format!("Serialization error: {}", e),
+                )),
+            }
+        }
+    }
+
+    // 4b: Local config (./opencode.json) — always keep in sync as a convenience copy
+    let local_config_path = cwd.join("opencode.json");
+    let local_needs_fix = if local_config_path.exists() {
+        std::fs::read_to_string(&local_config_path)
+            .map(|c| !c.contains("spex-state"))
+            .unwrap_or(true)
+    } else {
+        true
+    };
+
+    if local_needs_fix {
+        let existing: serde_json::Value = local_config_path
+            .exists()
+            .then(|| {
+                std::fs::read_to_string(&local_config_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+            })
+            .flatten()
+            .unwrap_or(serde_json::json!({
+                "mcp": {
+                    "spex-state": mcp_entry
+                }
+            }));
+
+        let (updated, _) = ToolTarget::OpenCode.merge_mcp_config(existing);
+
+        match serde_json::to_string_pretty(&updated) {
+            Ok(json_str) => match std::fs::write(&local_config_path, json_str) {
                 Ok(_) => results.push((
                     "opencode.json".to_string(),
-                    "Created opencode.json with spex-state MCP entry".to_string(),
+                    "Created/updated opencode.json with spex-state MCP entry".to_string(),
                 )),
                 Err(e) => results.push((
                     "opencode.json".to_string(),
-                    format!("Could not create opencode.json: {}", e),
+                    format!("Could not write opencode.json: {}", e),
                 )),
             },
             Err(e) => results.push((
@@ -350,7 +545,61 @@ pub async fn fix_issues() -> Vec<(String, String)> {
         }
     }
 
-    // Fix 5: Init git repo if missing
+    // Fix 5: Copilot CLI — write mcp-config.json if ~/.copilot/ exists but file is missing
+    let copilot_config_dir = ToolTarget::CopilotCli.config_dir();
+    if let Some(ref copilot_dir) = copilot_config_dir {
+        if copilot_dir.exists() {
+            if let Some(mcp_config_path) = ToolTarget::CopilotCli.global_mcp_config_path() {
+                let needs_fix = if mcp_config_path.exists() {
+                    std::fs::read_to_string(&mcp_config_path)
+                        .map(|c| !c.contains("spex-state"))
+                        .unwrap_or(true)
+                } else {
+                    true
+                };
+
+                if needs_fix {
+                    let existing: serde_json::Value = mcp_config_path
+                        .exists()
+                        .then(|| {
+                            std::fs::read_to_string(&mcp_config_path)
+                                .ok()
+                                .and_then(|s| serde_json::from_str(&s).ok())
+                        })
+                        .flatten()
+                        .unwrap_or(serde_json::json!({}));
+
+                    let (updated, _) = ToolTarget::CopilotCli.merge_mcp_config(existing);
+
+                    match serde_json::to_string_pretty(&updated) {
+                        Ok(json_str) => match std::fs::write(&mcp_config_path, json_str) {
+                            Ok(_) => results.push((
+                                "Copilot CLI MCP".to_string(),
+                                format!(
+                                    "Wrote spex-state MCP entry to {}",
+                                    mcp_config_path.display()
+                                ),
+                            )),
+                            Err(e) => results.push((
+                                "Copilot CLI MCP".to_string(),
+                                format!(
+                                    "Could not write {}: {}",
+                                    mcp_config_path.display(),
+                                    e
+                                ),
+                            )),
+                        },
+                        Err(e) => results.push((
+                            "Copilot CLI MCP".to_string(),
+                            format!("Serialization error: {}", e),
+                        )),
+                    }
+                }
+            }
+        }
+    }
+
+    // Fix 6: Init git repo if missing
     let has_git = {
         let mut found = false;
         let mut cur = cwd.clone();
