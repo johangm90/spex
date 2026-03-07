@@ -33,7 +33,7 @@ The problem it solves: when multiple LLM-based agents collaborate on a software 
 
 - **Not a web UI tool** — Spex is terminal-first. No browser dashboard, no SaaS backend, no remote sync (unlike Engram's Git sync).
 - **Not a general-purpose memory system** — The memory layer is an agent coordination scratchpad, not a long-term personal knowledge base. (Engram handles that use-case better.)
-- **Not multi-project / multi-repo** — Each `.spex/state.db` is scoped to one project root. Cross-project federation is out of scope.
+- **Not a cross-project federation layer** — The global database is a storage convenience; specs and tasks from different projects are isolated by `project_dir` partition. Cross-project spec references (e.g. linking a spec in repo A to a spec in repo B) are out of scope.
 - **Not an agent runtime** — Spex does not execute agents. It provides state; OpenCode executes agents.
 - **Not locked to OpenCode** — The MCP protocol is standard JSON-RPC 2.0 over stdio, usable by any MCP-compatible agent host. The bundled skills happen to target OpenCode's format.
 - **Not a CI/CD system** — Spex tracks spec status and gates; it does not trigger builds, run pipelines, or deploy code.
@@ -74,7 +74,7 @@ A developer building or running multi-agent pipelines (e.g. `spex-orchestrate` c
 
 ## Architecture Principles
 
-1. **Project-local state only** — All mutable state lives in `.spex/state.db` at the project root. The binary walks up the directory tree to find it (same pattern as `git`). No global mutable state.
+1. **Global DB, project-scoped queries** — All mutable state lives in `~/.local/share/spex/global-state.db` (resolved via `dirs::data_dir()`). The `project_dir` column — set from the `SPEX_PROJECT_DIR` environment variable or `std::env::current_dir()` at MCP server startup — namespaces every row. `spex init` / `spex new` still create a `.spex/` directory as a project-root marker for walk-up detection, but the DB is global-only. See ADR-0002.
 
 2. **Human approval is a hard gate** — The spec state machine (`draft → approved → in_progress ⇄ paused → done`) is enforced in Rust, not just by convention. Agents cannot transition a spec to `in_progress` without human `spex spec approve`.
 
@@ -118,7 +118,7 @@ The agent-facing API. JSON-RPC 2.0 over stdio. 14 distinct tool operations cover
 16 specialised agent skill files (`SKILL.md`) and 16 agent prompt files embedded in the binary at compile time. Installed to `~/.config/opencode/` via `spex setup` or `spex skill install --all`.
 
 ### Project Scaffolding
-`spex new <NAME>` and `spex init` for bootstrapping. Generates `PRD.md`, `opencode.json`, `.gitignore`, and `.spex/state.db` with auto-migrations.
+`spex new <NAME>` and `spex init` for bootstrapping. Generates `PRD.md`, `opencode.json`, `.gitignore`, and the `.spex/` project-root marker directory. The global DB at `~/.local/share/spex/global-state.db` is created automatically on first `spex mcp serve`; no per-project DB is created at scaffold time.
 
 ### Doctor & Auto-fix
 7 health checks covering DB, PRD, skills, MCP config, git repo, and stuck specs. `spex doctor --fix` auto-corrects fixable issues.
