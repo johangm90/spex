@@ -17,6 +17,7 @@ pub struct HandoffSnapshot {
     pub created_at: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_handoff_snapshot(
     pool: &SqlitePool,
     id: &str,

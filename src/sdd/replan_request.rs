@@ -17,6 +17,7 @@ pub struct ReplanRequest {
     pub updated_at: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_replan_request(
     pool: &SqlitePool,
     id: &str,

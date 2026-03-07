@@ -218,6 +218,7 @@ pub async fn cmd_orchestrate_locks(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_orchestrate_task_metadata(
     pool: &SqlitePool,
     task: &str,
@@ -264,6 +265,7 @@ pub async fn cmd_orchestrate_task_metadata(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_orchestrate_replan(
     pool: &SqlitePool,
     id: &str,

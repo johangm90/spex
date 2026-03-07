@@ -20,6 +20,7 @@ pub struct Incident {
     pub updated_at: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_incident(
     pool: &SqlitePool,
     id: &str,

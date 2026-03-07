@@ -12,6 +12,7 @@ use crate::sdd::{
 
 use super::util::colorize_status;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_task_add(
     pool: &SqlitePool,
     spec_id: &str,

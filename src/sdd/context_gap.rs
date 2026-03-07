@@ -19,6 +19,7 @@ pub struct ContextGap {
     pub updated_at: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn create_context_gap(
     pool: &SqlitePool,
     id: &str,

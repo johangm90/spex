@@ -12,6 +12,7 @@ use crate::sdd::{
 
 use super::util::colorize_status;
 
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_incident_add(
     pool: &SqlitePool,
     id: &str,
@@ -147,6 +148,7 @@ pub async fn cmd_incident_update(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_gap_add(
     pool: &SqlitePool,
     id: &str,
@@ -279,6 +281,7 @@ pub async fn cmd_gap_update(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_verify_add(
     pool: &SqlitePool,
     id: &str,
@@ -457,6 +460,7 @@ pub async fn cmd_interrupt_update(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_handoff_add(
     pool: &SqlitePool,
     id: &str,
