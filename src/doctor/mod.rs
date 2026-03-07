@@ -13,13 +13,17 @@ pub struct CheckResult {
 }
 
 pub async fn run_checks() -> Vec<CheckResult> {
-    // 1. .spex/state.db exists and is readable
-    // 2. PRD.md exists and is not the default template
-    // 3. ~/.config/opencode/skills/ exists
-    // 4. At least one skill is installed
-    // 5. OpenCode MCP entry in global or local config
+    // 1. Global DB exists and is readable (FAIL if not; auto-fixable)
+    // 2. Stale per-project .spex/state.db (WARN if present)
+    // 3. SPEX_PROJECT_DIR env var (WARN if not set)
+    // 4. PRD.md exists and is not the default template
+    // 5. ~/.config/opencode/skills/ exists
+    // 6. At least one skill is installed
+    // 7. OpenCode MCP entry in global or local config
     let mut results = vec![
-        check_state_db(),
+        check_global_db().await,
+        check_stale_per_project_db(),
+        check_spex_project_dir(),
         check_prd(),
         check_skills_dir(),
         check_skills_installed(),
@@ -45,30 +49,51 @@ pub async fn run_checks() -> Vec<CheckResult> {
     results
 }
 
-fn check_state_db() -> CheckResult {
+/// AC-14: Check that the global DB exists and is readable; auto-fixable via `--fix`.
+async fn check_global_db() -> CheckResult {
+    let path = match crate::sdd::db::global_db_path() {
+        Ok(p) => p,
+        Err(e) => {
+            return CheckResult {
+                name: "Global DB".to_string(),
+                status: CheckStatus::Fail,
+                message: format!("[FAIL] could not determine global DB path: {}", e),
+            };
+        }
+    };
+
+    match std::fs::metadata(&path) {
+        Ok(_) => CheckResult {
+            name: "Global DB".to_string(),
+            status: CheckStatus::Pass,
+            message: format!("[OK] global DB: {}", path.display()),
+        },
+        Err(_) => CheckResult {
+            name: "Global DB".to_string(),
+            status: CheckStatus::Fail,
+            message: format!(
+                "[FAIL] global DB not found at {} — run `spex doctor --fix` to create it",
+                path.display()
+            ),
+        },
+    }
+}
+
+/// AC-13: Warn if a stale per-project `.spex/state.db` exists in or above CWD.
+fn check_stale_per_project_db() -> CheckResult {
     let cwd = std::env::current_dir().unwrap_or_default();
-    // Walk up looking for .spex/state.db
     let mut current = cwd.clone();
     loop {
         let db_path = current.join(".spex").join("state.db");
         if db_path.exists() {
-            // Try to open it
-            match std::fs::metadata(&db_path) {
-                Ok(_) => {
-                    return CheckResult {
-                        name: "State DB".to_string(),
-                        status: CheckStatus::Pass,
-                        message: format!("Found at {}", db_path.display()),
-                    };
-                }
-                Err(e) => {
-                    return CheckResult {
-                        name: "State DB".to_string(),
-                        status: CheckStatus::Fail,
-                        message: format!("Cannot read {}: {}", db_path.display(), e),
-                    };
-                }
-            }
+            return CheckResult {
+                name: "Stale per-project DB".to_string(),
+                status: CheckStatus::Warn,
+                message: format!(
+                    "[WARN] stale per-project DB detected at {} — run 'spex db migrate-to-global' to migrate, then remove it",
+                    db_path.display()
+                ),
+            };
         }
         match current.parent() {
             Some(p) => current = p.to_path_buf(),
@@ -77,9 +102,25 @@ fn check_state_db() -> CheckResult {
     }
 
     CheckResult {
-        name: "State DB".to_string(),
-        status: CheckStatus::Fail,
-        message: "No .spex/state.db found. Run `spex new <name>` to create a project.".to_string(),
+        name: "Stale per-project DB".to_string(),
+        status: CheckStatus::Pass,
+        message: "[OK] no stale per-project DB found".to_string(),
+    }
+}
+
+/// AC-15: Warn if `SPEX_PROJECT_DIR` is not set in the environment.
+fn check_spex_project_dir() -> CheckResult {
+    match std::env::var("SPEX_PROJECT_DIR") {
+        Ok(val) => CheckResult {
+            name: "SPEX_PROJECT_DIR".to_string(),
+            status: CheckStatus::Pass,
+            message: format!("[OK] SPEX_PROJECT_DIR: {}", val),
+        },
+        Err(_) => CheckResult {
+            name: "SPEX_PROJECT_DIR".to_string(),
+            status: CheckStatus::Warn,
+            message: "[WARN] SPEX_PROJECT_DIR not set — project context will fall back to CWD which may be ambiguous in some editors".to_string(),
+        },
     }
 }
 
@@ -339,13 +380,24 @@ fn check_git_repo() -> CheckResult {
 }
 
 async fn check_stuck_specs() -> CheckResult {
-    match crate::sdd::db::open_project_db().await {
+    // Resolve the project directory the same way mcp_cmd does — SPEX_PROJECT_DIR or CWD.
+    let project_dir = std::env::var("SPEX_PROJECT_DIR")
+        .ok()
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .and_then(|p| p.canonicalize().ok())
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+        .unwrap_or_default();
+
+    match crate::sdd::db::open_global_db().await {
         Err(_) => CheckResult {
             name: "Stuck specs".to_string(),
             status: CheckStatus::Warn,
-            message: "Cannot open project DB to check.".to_string(),
+            message: "Cannot open global DB to check.".to_string(),
         },
-        Ok(pool) => match crate::sdd::spec::list_specs(&pool).await {
+        Ok(pool) => match crate::sdd::spec::list_specs(&pool, &project_dir).await {
             Err(e) => CheckResult {
                 name: "Stuck specs".to_string(),
                 status: CheckStatus::Fail,
@@ -382,20 +434,26 @@ async fn check_stuck_specs() -> CheckResult {
 pub async fn fix_issues() -> Vec<(String, String)> {
     let mut results = vec![];
 
-    // Fix 1: Create .spex/ directory if missing
+    // Fix 1: Create global DB if missing (AC-14)
     let cwd = std::env::current_dir().unwrap_or_default();
-    let spex_dir = cwd.join(".spex");
-    if !spex_dir.exists() {
-        match std::fs::create_dir_all(&spex_dir) {
-            Ok(_) => results.push((
-                "State DB".to_string(),
-                format!("Created {}", spex_dir.display()),
-            )),
-            Err(e) => results.push((
-                "State DB".to_string(),
-                format!("Could not create .spex/: {}", e),
-            )),
+    match crate::sdd::db::global_db_path() {
+        Err(e) => results.push((
+            "Global DB".to_string(),
+            format!("Could not determine global DB path: {}", e),
+        )),
+        Ok(ref path) if !path.exists() => {
+            match crate::sdd::db::open_global_db().await {
+                Ok(_) => results.push((
+                    "Global DB".to_string(),
+                    format!("Created global DB at {}", path.display()),
+                )),
+                Err(e) => results.push((
+                    "Global DB".to_string(),
+                    format!("Could not create global DB: {}", e),
+                )),
+            }
         }
+        Ok(_) => {} // already exists, nothing to fix
     }
 
     // Fix 2: Create docs/PRD.md if missing
