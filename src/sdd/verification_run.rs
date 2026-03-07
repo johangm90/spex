@@ -20,6 +20,7 @@ pub struct VerificationRun {
 #[allow(clippy::too_many_arguments)]
 pub async fn create_verification_run(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec_id: &str,
     task_id: Option<&str>,
@@ -32,9 +33,11 @@ pub async fn create_verification_run(
 ) -> Result<VerificationRun> {
     let now = Utc::now().to_rfc3339();
     sqlx::query(
-        "INSERT INTO verification_runs (id, spec_id, task_id, slice_id, kind, status, command, summary, evidence, created_at)          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO verification_runs (id, project_dir, spec_id, task_id, slice_id, kind, status, command, summary, evidence, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(id)
+    .bind(project_dir)
     .bind(spec_id)
     .bind(task_id)
     .bind(slice_id)
@@ -47,15 +50,20 @@ pub async fn create_verification_run(
     .execute(pool)
     .await?;
 
-    get_verification_run(pool, id)
+    get_verification_run(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Failed to create verification run '{}'", id))
 }
 
-pub async fn get_verification_run(pool: &SqlitePool, id: &str) -> Result<Option<VerificationRun>> {
+pub async fn get_verification_run(
+    pool: &SqlitePool,
+    project_dir: &str,
+    id: &str,
+) -> Result<Option<VerificationRun>> {
     let row = sqlx::query_as::<_, (String, String, Option<String>, Option<String>, String, String, Option<String>, String, Option<String>, String)>(
-        "SELECT id, spec_id, task_id, slice_id, kind, status, command, summary, evidence, created_at FROM verification_runs WHERE id = ?"
+        "SELECT id, spec_id, task_id, slice_id, kind, status, command, summary, evidence, created_at FROM verification_runs WHERE project_dir = ? AND id = ?"
     )
+    .bind(project_dir)
     .bind(id)
     .fetch_optional(pool)
     .await?;
@@ -80,12 +88,13 @@ pub async fn get_verification_run(pool: &SqlitePool, id: &str) -> Result<Option<
 
 pub async fn list_verification_runs(
     pool: &SqlitePool,
+    project_dir: &str,
     spec_filter: Option<&str>,
     task_filter: Option<&str>,
     status_filter: Option<&str>,
 ) -> Result<Vec<VerificationRun>> {
     let mut query = String::from(
-        "SELECT id, spec_id, task_id, slice_id, kind, status, command, summary, evidence, created_at FROM verification_runs WHERE 1=1"
+        "SELECT id, spec_id, task_id, slice_id, kind, status, command, summary, evidence, created_at FROM verification_runs WHERE project_dir = ?"
     );
     if spec_filter.is_some() {
         query.push_str(" AND spec_id = ?");
@@ -113,6 +122,7 @@ pub async fn list_verification_runs(
             String,
         ),
     >(&query);
+    q = q.bind(project_dir);
     if let Some(spec) = spec_filter {
         q = q.bind(spec);
     }

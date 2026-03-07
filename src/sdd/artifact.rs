@@ -18,6 +18,7 @@ pub struct Artifact {
 #[allow(clippy::too_many_arguments)]
 pub async fn register_artifact(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec: &str,
     task: Option<&str>,
@@ -28,10 +29,11 @@ pub async fn register_artifact(
 ) -> Result<Artifact> {
     let now = Utc::now().to_rfc3339();
     sqlx::query(
-        "INSERT INTO artifacts (id, spec, task, agent, type, path, description, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO artifacts (id, project_dir, spec, task, agent, type, path, description, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(id)
+    .bind(project_dir)
     .bind(spec)
     .bind(task)
     .bind(agent)
@@ -42,7 +44,7 @@ pub async fn register_artifact(
     .execute(pool)
     .await?;
 
-    query_artifacts(pool, Some(spec), task, Some(agent), None)
+    query_artifacts(pool, project_dir, Some(spec), task, Some(agent), None)
         .await?
         .into_iter()
         .find(|a| a.id == id)
@@ -51,13 +53,14 @@ pub async fn register_artifact(
 
 pub async fn query_artifacts(
     pool: &SqlitePool,
+    project_dir: &str,
     spec_filter: Option<&str>,
     task_filter: Option<&str>,
     agent_filter: Option<&str>,
     type_filter: Option<&str>,
 ) -> Result<Vec<Artifact>> {
     let mut query_str = String::from(
-        "SELECT id, spec, task, agent, type, path, description, created_at FROM artifacts WHERE 1=1",
+        "SELECT id, spec, task, agent, type, path, description, created_at FROM artifacts WHERE project_dir = ?",
     );
 
     if spec_filter.is_some() {
@@ -87,6 +90,8 @@ pub async fn query_artifacts(
             String,
         ),
     >(&query_str);
+
+    q = q.bind(project_dir);
 
     if let Some(s) = spec_filter {
         q = q.bind(s);

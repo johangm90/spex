@@ -23,6 +23,7 @@ pub struct Incident {
 #[allow(clippy::too_many_arguments)]
 pub async fn create_incident(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec_id: &str,
     task_id: Option<&str>,
@@ -34,9 +35,11 @@ pub async fn create_incident(
 ) -> Result<Incident> {
     let now = Utc::now().to_rfc3339();
     sqlx::query(
-        "INSERT INTO incidents (id, spec_id, task_id, title, severity, status, source, blocking, repro_steps, created_at, updated_at)          VALUES (?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?)"
+        "INSERT INTO incidents (id, project_dir, spec_id, task_id, title, severity, status, source, blocking, repro_steps, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?)"
     )
     .bind(id)
+    .bind(project_dir)
     .bind(spec_id)
     .bind(task_id)
     .bind(title)
@@ -49,15 +52,20 @@ pub async fn create_incident(
     .execute(pool)
     .await?;
 
-    get_incident(pool, id)
+    get_incident(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Failed to create incident '{}'", id))
 }
 
-pub async fn get_incident(pool: &SqlitePool, id: &str) -> Result<Option<Incident>> {
+pub async fn get_incident(
+    pool: &SqlitePool,
+    project_dir: &str,
+    id: &str,
+) -> Result<Option<Incident>> {
     let row = sqlx::query_as::<_, (String, String, Option<String>, String, String, String, String, i64, Option<String>, Option<String>, Option<String>, String, String)>(
-        "SELECT id, spec_id, task_id, title, severity, status, source, blocking, repro_steps, root_cause, fix_strategy, created_at, updated_at FROM incidents WHERE id = ?"
+        "SELECT id, spec_id, task_id, title, severity, status, source, blocking, repro_steps, root_cause, fix_strategy, created_at, updated_at FROM incidents WHERE project_dir = ? AND id = ?"
     )
+    .bind(project_dir)
     .bind(id)
     .fetch_optional(pool)
     .await?;
@@ -97,11 +105,12 @@ pub async fn get_incident(pool: &SqlitePool, id: &str) -> Result<Option<Incident
 
 pub async fn list_incidents(
     pool: &SqlitePool,
+    project_dir: &str,
     spec_filter: Option<&str>,
     status_filter: Option<&str>,
 ) -> Result<Vec<Incident>> {
     let mut query = String::from(
-        "SELECT id, spec_id, task_id, title, severity, status, source, blocking, repro_steps, root_cause, fix_strategy, created_at, updated_at FROM incidents WHERE 1=1"
+        "SELECT id, spec_id, task_id, title, severity, status, source, blocking, repro_steps, root_cause, fix_strategy, created_at, updated_at FROM incidents WHERE project_dir = ?"
     );
     if spec_filter.is_some() {
         query.push_str(" AND spec_id = ?");
@@ -129,6 +138,7 @@ pub async fn list_incidents(
             String,
         ),
     >(&query);
+    q = q.bind(project_dir);
     if let Some(spec) = spec_filter {
         q = q.bind(spec);
     }
@@ -175,13 +185,14 @@ pub async fn list_incidents(
 
 pub async fn update_incident(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     status: Option<&str>,
     blocking: Option<bool>,
     root_cause: Option<&str>,
     fix_strategy: Option<&str>,
 ) -> Result<Incident> {
-    let current = get_incident(pool, id)
+    let current = get_incident(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Incident '{}' not found", id))?;
     let now = Utc::now().to_rfc3339();
@@ -191,18 +202,19 @@ pub async fn update_incident(
     let fix_strategy = fix_strategy.map(str::to_string).or(current.fix_strategy);
 
     sqlx::query(
-        "UPDATE incidents SET status = ?, blocking = ?, root_cause = ?, fix_strategy = ?, updated_at = ? WHERE id = ?"
+        "UPDATE incidents SET status = ?, blocking = ?, root_cause = ?, fix_strategy = ?, updated_at = ? WHERE project_dir = ? AND id = ?"
     )
     .bind(status)
     .bind(if blocking { 1 } else { 0 })
     .bind(root_cause)
     .bind(fix_strategy)
     .bind(&now)
+    .bind(project_dir)
     .bind(id)
     .execute(pool)
     .await?;
 
-    get_incident(pool, id)
+    get_incident(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Incident '{}' not found after update", id))
 }

@@ -24,6 +24,7 @@ pub struct Memory {
 
 pub async fn memory_set(
     pool: &SqlitePool,
+    project_dir: &str,
     agent: &str,
     key: &str,
     value_json: &str,
@@ -42,15 +43,16 @@ pub async fn memory_set(
     });
 
     sqlx::query(
-        "INSERT INTO memory (agent, key, value, spec, type, expires_at, revision_count) \
-         VALUES (?, ?, ?, ?, ?, ?, 1) \
-         ON CONFLICT(agent, spec, key) DO UPDATE SET \
+        "INSERT INTO memory (project_dir, agent, key, value, spec, type, expires_at, revision_count) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1) \
+         ON CONFLICT(project_dir, agent, spec, key) DO UPDATE SET \
            value = excluded.value, \
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
            revision_count = revision_count + 1, \
            type = COALESCE(excluded.type, type), \
            expires_at = COALESCE(excluded.expires_at, expires_at)",
     )
+    .bind(project_dir)
     .bind(agent)
     .bind(key)
     .bind(value_json)
@@ -67,11 +69,12 @@ pub async fn memory_set(
 #[allow(dead_code)]
 pub async fn memory_get(
     pool: &SqlitePool,
+    project_dir: &str,
     agent: &str,
     key: &str,
     spec: Option<&str>,
 ) -> Result<Option<String>> {
-    let row = memory_get_full(pool, agent, key, spec).await?;
+    let row = memory_get_full(pool, project_dir, agent, key, spec).await?;
     Ok(row.map(|m| m.value))
 }
 
@@ -79,6 +82,7 @@ pub async fn memory_get(
 /// On a hit, bumps access_count and last_accessed_at.
 pub async fn memory_get_full(
     pool: &SqlitePool,
+    project_dir: &str,
     agent: &str,
     key: &str,
     spec: Option<&str>,
@@ -88,10 +92,11 @@ pub async fn memory_get_full(
             "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
                     access_count, last_accessed_at, revision_count \
              FROM memory \
-             WHERE agent = ? AND key = ? AND spec = ? \
+             WHERE project_dir = ? AND agent = ? AND key = ? AND spec = ? \
                AND deleted_at IS NULL \
                AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
         )
+        .bind(project_dir)
         .bind(agent)
         .bind(key)
         .bind(spec)
@@ -102,11 +107,12 @@ pub async fn memory_get_full(
             "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
                     access_count, last_accessed_at, revision_count \
              FROM memory \
-             WHERE agent = ? AND key = ? \
+             WHERE project_dir = ? AND agent = ? AND key = ? \
                AND deleted_at IS NULL \
                AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
              ORDER BY updated_at DESC LIMIT 1",
         )
+        .bind(project_dir)
         .bind(agent)
         .bind(key)
         .fetch_optional(pool)
@@ -132,17 +138,19 @@ pub async fn memory_get_full(
 /// IMP-007: always scope to `spec` when provided to prevent cross-spec contamination.
 pub async fn memory_get_all(
     pool: &SqlitePool,
+    project_dir: &str,
     agent: &str,
     spec: Option<&str>,
 ) -> Result<Vec<(String, String)>> {
     let rows: Vec<(String, String)> = if let Some(spec) = spec {
         sqlx::query_as(
             "SELECT key, value FROM memory \
-             WHERE agent = ? AND spec = ? \
+             WHERE project_dir = ? AND agent = ? AND spec = ? \
                AND deleted_at IS NULL \
                AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
              ORDER BY key",
         )
+        .bind(project_dir)
         .bind(agent)
         .bind(spec)
         .fetch_all(pool)
@@ -150,11 +158,12 @@ pub async fn memory_get_all(
     } else {
         sqlx::query_as(
             "SELECT key, value FROM memory \
-             WHERE agent = ? \
+             WHERE project_dir = ? AND agent = ? \
                AND deleted_at IS NULL \
                AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
              ORDER BY key",
         )
+        .bind(project_dir)
         .bind(agent)
         .fetch_all(pool)
         .await?
@@ -164,8 +173,10 @@ pub async fn memory_get_all(
 }
 
 /// Full-text search across memory entries using FTS5.
+/// Note: FTS5 table does not store project_dir; project_dir filter is applied on the joined memory table.
 pub async fn memory_search(
     pool: &SqlitePool,
+    project_dir: &str,
     agent: &str,
     query: &str,
     spec: Option<&str>,
@@ -184,6 +195,7 @@ pub async fn memory_search(
              FROM memory m \
              JOIN memory_fts f ON m.rowid = f.rowid \
              WHERE memory_fts MATCH ? \
+               AND m.project_dir = ? \
                AND m.agent = ? \
                AND m.spec = ? \
                AND m.type = ? \
@@ -193,6 +205,7 @@ pub async fn memory_search(
              LIMIT ?",
         )
         .bind(query)
+        .bind(project_dir)
         .bind(agent)
         .bind(spec)
         .bind(mem_type)
@@ -207,6 +220,7 @@ pub async fn memory_search(
              FROM memory m \
              JOIN memory_fts f ON m.rowid = f.rowid \
              WHERE memory_fts MATCH ? \
+               AND m.project_dir = ? \
                AND m.agent = ? \
                AND m.spec = ? \
                AND m.deleted_at IS NULL \
@@ -215,6 +229,7 @@ pub async fn memory_search(
              LIMIT ?",
         )
         .bind(query)
+        .bind(project_dir)
         .bind(agent)
         .bind(spec)
         .bind(limit)
@@ -228,6 +243,7 @@ pub async fn memory_search(
              FROM memory m \
              JOIN memory_fts f ON m.rowid = f.rowid \
              WHERE memory_fts MATCH ? \
+               AND m.project_dir = ? \
                AND m.agent = ? \
                AND m.type = ? \
                AND m.deleted_at IS NULL \
@@ -236,6 +252,7 @@ pub async fn memory_search(
              LIMIT ?",
         )
         .bind(query)
+        .bind(project_dir)
         .bind(agent)
         .bind(mem_type)
         .bind(limit)
@@ -249,6 +266,7 @@ pub async fn memory_search(
              FROM memory m \
              JOIN memory_fts f ON m.rowid = f.rowid \
              WHERE memory_fts MATCH ? \
+               AND m.project_dir = ? \
                AND m.agent = ? \
                AND m.deleted_at IS NULL \
                AND (m.expires_at IS NULL OR m.expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
@@ -256,6 +274,7 @@ pub async fn memory_search(
              LIMIT ?",
         )
         .bind(query)
+        .bind(project_dir)
         .bind(agent)
         .bind(limit)
         .fetch_all(pool)
@@ -268,6 +287,7 @@ pub async fn memory_search(
 /// Soft-delete a memory entry. Returns true if a row was affected.
 pub async fn memory_delete(
     pool: &SqlitePool,
+    project_dir: &str,
     agent: &str,
     key: &str,
     spec: Option<&str>,
@@ -275,8 +295,9 @@ pub async fn memory_delete(
     let spec = spec.unwrap_or("");
     let result = sqlx::query(
         "UPDATE memory SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
-         WHERE agent = ? AND key = ? AND spec = ? AND deleted_at IS NULL",
+         WHERE project_dir = ? AND agent = ? AND key = ? AND spec = ? AND deleted_at IS NULL",
     )
+    .bind(project_dir)
     .bind(agent)
     .bind(key)
     .bind(spec)
@@ -289,6 +310,7 @@ pub async fn memory_delete(
 /// Returns the most recently accessed memory entries for session recovery.
 pub async fn memory_context(
     pool: &SqlitePool,
+    project_dir: &str,
     agent: &str,
     spec: Option<&str>,
     limit: Option<i64>,
@@ -300,12 +322,13 @@ pub async fn memory_context(
             "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
                     access_count, last_accessed_at, revision_count \
              FROM memory \
-             WHERE agent = ? AND spec = ? \
+             WHERE project_dir = ? AND agent = ? AND spec = ? \
                AND deleted_at IS NULL \
                AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
              ORDER BY last_accessed_at DESC, access_count DESC \
              LIMIT ?",
         )
+        .bind(project_dir)
         .bind(agent)
         .bind(spec)
         .bind(limit)
@@ -316,12 +339,13 @@ pub async fn memory_context(
             "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
                     access_count, last_accessed_at, revision_count \
              FROM memory \
-             WHERE agent = ? \
+             WHERE project_dir = ? AND agent = ? \
                AND deleted_at IS NULL \
                AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
              ORDER BY last_accessed_at DESC, access_count DESC \
              LIMIT ?",
         )
+        .bind(project_dir)
         .bind(agent)
         .bind(limit)
         .fetch_all(pool)
@@ -333,15 +357,20 @@ pub async fn memory_context(
 
 /// Returns memory statistics for an agent (optionally scoped to a spec).
 #[allow(dead_code)]
-pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) -> Result<Value> {
+pub async fn memory_stats(
+    pool: &SqlitePool,
+    project_dir: &str,
+    agent: &str,
+    spec: Option<&str>,
+) -> Result<Value> {
     let (where_clause_base, spec_bind): (&str, bool) = if spec.is_some() {
         (
-            "agent = ? AND spec = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "project_dir = ? AND agent = ? AND spec = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
             true,
         )
     } else {
         (
-            "agent = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            "project_dir = ? AND agent = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
             false,
         )
     };
@@ -351,6 +380,7 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
         let row: (i64,) = sqlx::query_as(&format!(
             "SELECT COUNT(*) FROM memory WHERE {where_clause_base}"
         ))
+        .bind(project_dir)
         .bind(agent)
         .bind(spec.unwrap())
         .fetch_one(pool)
@@ -360,6 +390,7 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
         let row: (i64,) = sqlx::query_as(&format!(
             "SELECT COUNT(*) FROM memory WHERE {where_clause_base}"
         ))
+        .bind(project_dir)
         .bind(agent)
         .fetch_one(pool)
         .await?;
@@ -371,6 +402,7 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
         sqlx::query_as(&format!(
             "SELECT type, COUNT(*) as cnt FROM memory WHERE {where_clause_base} GROUP BY type"
         ))
+        .bind(project_dir)
         .bind(agent)
         .bind(spec.unwrap())
         .fetch_all(pool)
@@ -379,6 +411,7 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
         sqlx::query_as(&format!(
             "SELECT type, COUNT(*) as cnt FROM memory WHERE {where_clause_base} GROUP BY type"
         ))
+        .bind(project_dir)
         .bind(agent)
         .fetch_all(pool)
         .await?
@@ -395,6 +428,7 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
         sqlx::query_as(&format!(
             "SELECT key FROM memory WHERE {where_clause_base} ORDER BY access_count DESC LIMIT 1"
         ))
+        .bind(project_dir)
         .bind(agent)
         .bind(spec.unwrap())
         .fetch_optional(pool)
@@ -403,6 +437,7 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
         sqlx::query_as(&format!(
             "SELECT key FROM memory WHERE {where_clause_base} ORDER BY access_count DESC LIMIT 1"
         ))
+        .bind(project_dir)
         .bind(agent)
         .fetch_optional(pool)
         .await?
@@ -413,6 +448,7 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
         sqlx::query_as(&format!(
             "SELECT updated_at FROM memory WHERE {where_clause_base} ORDER BY updated_at DESC LIMIT 1"
         ))
+        .bind(project_dir)
         .bind(agent)
         .bind(spec.unwrap())
         .fetch_optional(pool)
@@ -421,6 +457,7 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
         sqlx::query_as(&format!(
             "SELECT updated_at FROM memory WHERE {where_clause_base} ORDER BY updated_at DESC LIMIT 1"
         ))
+        .bind(project_dir)
         .bind(agent)
         .fetch_optional(pool)
         .await?
@@ -441,6 +478,8 @@ mod tests {
     use super::*;
     use sqlx::SqlitePool;
 
+    const TEST_PROJECT: &str = "/test/project";
+
     /// Create a fresh in-memory SQLite pool and run all migrations.
     async fn make_pool() -> SqlitePool {
         let pool = SqlitePool::connect(":memory:")
@@ -460,6 +499,7 @@ mod tests {
 
         memory_set(
             &pool,
+            TEST_PROJECT,
             "alice",
             "arch_decision",
             "we use sqlite for persistence",
@@ -470,11 +510,20 @@ mod tests {
         .await
         .unwrap();
 
-        memory_set(&pool, "alice", "unrelated", "hello world", None, None, None)
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            TEST_PROJECT,
+            "alice",
+            "unrelated",
+            "hello world",
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
-        let results = memory_search(&pool, "alice", "sqlite", None, None, None)
+        let results = memory_search(&pool, TEST_PROJECT, "alice", "sqlite", None, None, None)
             .await
             .unwrap();
 
@@ -487,31 +536,38 @@ mod tests {
     async fn ac2_delete_soft_deletes_and_hides_entry() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "foo", "bar", None, None, None)
+        memory_set(&pool, TEST_PROJECT, "alice", "foo", "bar", None, None, None)
             .await
             .unwrap();
 
-        let deleted = memory_delete(&pool, "alice", "foo", None).await.unwrap();
+        let deleted = memory_delete(&pool, TEST_PROJECT, "alice", "foo", None)
+            .await
+            .unwrap();
         assert!(
             deleted,
             "memory_delete should return true when a row is affected"
         );
 
-        let full = memory_get_full(&pool, "alice", "foo", None).await.unwrap();
+        let full = memory_get_full(&pool, TEST_PROJECT, "alice", "foo", None)
+            .await
+            .unwrap();
         assert!(
             full.is_none(),
             "deleted entry must not be visible via memory_get_full"
         );
 
-        let search_results = memory_search(&pool, "alice", "foo", None, None, None)
-            .await
-            .unwrap();
+        let search_results =
+            memory_search(&pool, TEST_PROJECT, "alice", "foo", None, None, None)
+                .await
+                .unwrap();
         assert!(
             search_results.is_empty(),
             "deleted entry must not appear in search results"
         );
 
-        let all = memory_get_all(&pool, "alice", None).await.unwrap();
+        let all = memory_get_all(&pool, TEST_PROJECT, "alice", None)
+            .await
+            .unwrap();
         assert!(
             !all.iter().any(|(k, _)| k == "foo"),
             "deleted entry must not appear in memory_get_all"
@@ -525,6 +581,7 @@ mod tests {
 
         memory_set(
             &pool,
+            TEST_PROJECT,
             "alice",
             "my_key",
             "my_value",
@@ -535,7 +592,7 @@ mod tests {
         .await
         .unwrap();
 
-        let mem = memory_get_full(&pool, "alice", "my_key", Some("spec"))
+        let mem = memory_get_full(&pool, TEST_PROJECT, "alice", "my_key", Some("spec"))
             .await
             .unwrap()
             .expect("entry should exist");
@@ -554,6 +611,7 @@ mod tests {
 
         memory_set(
             &pool,
+            TEST_PROJECT,
             "alice",
             "expiring_key",
             "expiring_value",
@@ -565,7 +623,7 @@ mod tests {
         .unwrap();
 
         // Immediately after insert the entry must be visible.
-        let before = memory_get_full(&pool, "alice", "expiring_key", None)
+        let before = memory_get_full(&pool, TEST_PROJECT, "alice", "expiring_key", None)
             .await
             .unwrap();
         assert!(before.is_some(), "entry must be visible before TTL expires");
@@ -574,7 +632,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
         // After TTL expiry the entry must be hidden.
-        let after = memory_get_full(&pool, "alice", "expiring_key", None)
+        let after = memory_get_full(&pool, TEST_PROJECT, "alice", "expiring_key", None)
             .await
             .unwrap();
         assert!(
@@ -589,15 +647,19 @@ mod tests {
         let pool = make_pool().await;
 
         for key in &["k1", "k2", "k3"] {
-            memory_set(&pool, "alice", key, "value", None, None, None)
+            memory_set(&pool, TEST_PROJECT, "alice", key, "value", None, None, None)
                 .await
                 .unwrap();
         }
 
         // Access "k2" to bump its last_accessed_at to the most recent.
-        memory_get_full(&pool, "alice", "k2", None).await.unwrap();
+        memory_get_full(&pool, TEST_PROJECT, "alice", "k2", None)
+            .await
+            .unwrap();
 
-        let ctx = memory_context(&pool, "alice", None, Some(2)).await.unwrap();
+        let ctx = memory_context(&pool, TEST_PROJECT, "alice", None, Some(2))
+            .await
+            .unwrap();
 
         assert_eq!(ctx.len(), 2, "context should return exactly 2 entries");
         assert_eq!(ctx[0].key, "k2", "most recently accessed key must be first");
@@ -608,17 +670,37 @@ mod tests {
     async fn ac6_stats_returns_correct_counts() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "k1", "v1", None, Some("decision"), None)
-            .await
-            .unwrap();
-        memory_set(&pool, "alice", "k2", "v2", None, Some("pattern"), None)
-            .await
-            .unwrap();
-        memory_set(&pool, "alice", "k3", "v3", None, None, None)
+        memory_set(
+            &pool,
+            TEST_PROJECT,
+            "alice",
+            "k1",
+            "v1",
+            None,
+            Some("decision"),
+            None,
+        )
+        .await
+        .unwrap();
+        memory_set(
+            &pool,
+            TEST_PROJECT,
+            "alice",
+            "k2",
+            "v2",
+            None,
+            Some("pattern"),
+            None,
+        )
+        .await
+        .unwrap();
+        memory_set(&pool, TEST_PROJECT, "alice", "k3", "v3", None, None, None)
             .await
             .unwrap();
 
-        let stats = memory_stats(&pool, "alice", None).await.unwrap();
+        let stats = memory_stats(&pool, TEST_PROJECT, "alice", None)
+            .await
+            .unwrap();
 
         assert_eq!(stats["total"], 3, "total must equal 3");
         assert_eq!(
@@ -640,7 +722,7 @@ mod tests {
     async fn ac7_memory_get_bumps_access_count() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "tracked", "v", None, None, None)
+        memory_set(&pool, TEST_PROJECT, "alice", "tracked", "v", None, None, None)
             .await
             .unwrap();
 
@@ -648,18 +730,18 @@ mod tests {
         // Note: memory_get_full returns the row *before* the UPDATE that bumps the counter,
         // so the Nth call returns access_count = N-1.  After 3 calls the DB holds 3;
         // a 4th read returns 3 (the count written by the 3rd call's UPDATE).
-        memory_get_full(&pool, "alice", "tracked", None)
+        memory_get_full(&pool, TEST_PROJECT, "alice", "tracked", None)
             .await
             .unwrap();
-        memory_get_full(&pool, "alice", "tracked", None)
+        memory_get_full(&pool, TEST_PROJECT, "alice", "tracked", None)
             .await
             .unwrap();
-        memory_get_full(&pool, "alice", "tracked", None)
+        memory_get_full(&pool, TEST_PROJECT, "alice", "tracked", None)
             .await
             .unwrap();
 
         // 4th read — returns the access_count that was committed by call 3 = 3.
-        let fourth = memory_get_full(&pool, "alice", "tracked", None)
+        let fourth = memory_get_full(&pool, TEST_PROJECT, "alice", "tracked", None)
             .await
             .unwrap()
             .expect("entry must still exist");

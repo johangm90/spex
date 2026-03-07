@@ -15,6 +15,7 @@ pub struct Event {
 
 pub async fn emit_event(
     pool: &SqlitePool,
+    project_dir: &str,
     event_type: &str,
     spec: Option<&str>,
     agent: Option<&str>,
@@ -22,8 +23,9 @@ pub async fn emit_event(
 ) -> Result<()> {
     let now = Utc::now().to_rfc3339();
     sqlx::query(
-        "INSERT INTO events (type, spec, agent, payload, timestamp) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO events (project_dir, type, spec, agent, payload, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
     )
+    .bind(project_dir)
     .bind(event_type)
     .bind(spec)
     .bind(agent)
@@ -36,6 +38,7 @@ pub async fn emit_event(
 
 pub async fn query_events(
     pool: &SqlitePool,
+    project_dir: &str,
     type_filter: Option<&str>,
     spec_filter: Option<&str>,
     agent_filter: Option<&str>,
@@ -43,8 +46,9 @@ pub async fn query_events(
     since: Option<&str>,
     until: Option<&str>,
 ) -> Result<Vec<Event>> {
-    let mut query_str =
-        String::from("SELECT id, type, spec, agent, payload, timestamp FROM events WHERE 1=1");
+    let mut query_str = String::from(
+        "SELECT id, type, spec, agent, payload, timestamp FROM events WHERE project_dir = ?",
+    );
 
     if type_filter.is_some() {
         query_str.push_str(" AND type = ?");
@@ -71,6 +75,8 @@ pub async fn query_events(
     let mut q = sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, String, String)>(
         &query_str,
     );
+
+    q = q.bind(project_dir);
 
     if let Some(t) = type_filter {
         q = q.bind(t);

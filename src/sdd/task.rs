@@ -68,6 +68,7 @@ fn normalize_lock_requirements(
 #[allow(clippy::too_many_arguments)]
 pub async fn create_task(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec: &str,
     title: &str,
@@ -94,10 +95,11 @@ pub async fn create_task(
     let lock_requirements_json = serde_json::to_string(&normalized_locks)?;
 
     sqlx::query(
-        "INSERT INTO tasks (id, spec, title, agent, status, inputs, depends_on, conflicts_with, lock_set, lock_requirements, priority, risk_level, execution_bucket, estimate_points, unblock_value, plan_version, output_artifact, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO tasks (id, project_dir, spec, title, agent, status, inputs, depends_on, conflicts_with, lock_set, lock_requirements, priority, risk_level, execution_bucket, estimate_points, unblock_value, plan_version, output_artifact, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, 'ready', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(id)
+    .bind(project_dir)
     .bind(spec)
     .bind(title)
     .bind(agent)
@@ -118,33 +120,40 @@ pub async fn create_task(
     .execute(pool)
     .await?;
 
-    get_task(pool, id)
+    get_task(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Failed to create task '{}'", id))
 }
 
-pub async fn get_task(pool: &SqlitePool, id: &str) -> Result<Option<Task>> {
+pub async fn get_task(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<Option<Task>> {
     let row = sqlx::query_as::<_, Task>(
-        "SELECT id, spec, title, agent, status, inputs, depends_on, conflicts_with, lock_set, lock_requirements, priority, risk_level, execution_bucket, estimate_points, unblock_value, plan_version, output_artifact, created_at, updated_at FROM tasks WHERE id = ?"
+        "SELECT id, spec, title, agent, status, inputs, depends_on, conflicts_with, lock_set, lock_requirements, priority, risk_level, execution_bucket, estimate_points, unblock_value, plan_version, output_artifact, created_at, updated_at FROM tasks WHERE project_dir = ? AND id = ?"
     )
+    .bind(project_dir)
     .bind(id)
     .fetch_optional(pool)
     .await?;
     Ok(row)
 }
 
-pub async fn list_tasks(pool: &SqlitePool, spec_filter: Option<&str>) -> Result<Vec<Task>> {
+pub async fn list_tasks(
+    pool: &SqlitePool,
+    project_dir: &str,
+    spec_filter: Option<&str>,
+) -> Result<Vec<Task>> {
     let rows = if let Some(spec) = spec_filter {
         sqlx::query_as::<_, Task>(
-            "SELECT id, spec, title, agent, status, inputs, depends_on, conflicts_with, lock_set, lock_requirements, priority, risk_level, execution_bucket, estimate_points, unblock_value, plan_version, output_artifact, created_at, updated_at FROM tasks WHERE spec = ? ORDER BY priority ASC, unblock_value DESC, estimate_points ASC, id"
+            "SELECT id, spec, title, agent, status, inputs, depends_on, conflicts_with, lock_set, lock_requirements, priority, risk_level, execution_bucket, estimate_points, unblock_value, plan_version, output_artifact, created_at, updated_at FROM tasks WHERE project_dir = ? AND spec = ? ORDER BY priority ASC, unblock_value DESC, estimate_points ASC, id"
         )
+        .bind(project_dir)
         .bind(spec)
         .fetch_all(pool)
         .await?
     } else {
         sqlx::query_as::<_, Task>(
-            "SELECT id, spec, title, agent, status, inputs, depends_on, conflicts_with, lock_set, lock_requirements, priority, risk_level, execution_bucket, estimate_points, unblock_value, plan_version, output_artifact, created_at, updated_at FROM tasks ORDER BY spec, priority ASC, unblock_value DESC, estimate_points ASC, id"
+            "SELECT id, spec, title, agent, status, inputs, depends_on, conflicts_with, lock_set, lock_requirements, priority, risk_level, execution_bucket, estimate_points, unblock_value, plan_version, output_artifact, created_at, updated_at FROM tasks WHERE project_dir = ? ORDER BY spec, priority ASC, unblock_value DESC, estimate_points ASC, id"
         )
+        .bind(project_dir)
         .fetch_all(pool)
         .await?
     };
@@ -203,36 +212,48 @@ fn validate_task_transition(from: &str, to: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn update_task_status(pool: &SqlitePool, id: &str, new_status: &str) -> Result<Task> {
-    let task = get_task(pool, id)
+pub async fn update_task_status(
+    pool: &SqlitePool,
+    project_dir: &str,
+    id: &str,
+    new_status: &str,
+) -> Result<Task> {
+    let task = get_task(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Task '{}' not found", id))?;
     validate_task_transition(&task.status, new_status)?;
     let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?")
-        .bind(new_status)
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    get_task(pool, id)
+    sqlx::query(
+        "UPDATE tasks SET status = ?, updated_at = ? WHERE project_dir = ? AND id = ?",
+    )
+    .bind(new_status)
+    .bind(&now)
+    .bind(project_dir)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    get_task(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Task '{}' not found after update", id))
 }
 
 pub async fn update_task_output_artifact(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     output_artifact: &str,
 ) -> Result<Task> {
     let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE tasks SET output_artifact = ?, updated_at = ? WHERE id = ?")
-        .bind(output_artifact)
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    get_task(pool, id)
+    sqlx::query(
+        "UPDATE tasks SET output_artifact = ?, updated_at = ? WHERE project_dir = ? AND id = ?",
+    )
+    .bind(output_artifact)
+    .bind(&now)
+    .bind(project_dir)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    get_task(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Task '{}' not found", id))
 }
@@ -240,6 +261,7 @@ pub async fn update_task_output_artifact(
 #[allow(clippy::too_many_arguments)]
 pub async fn update_task_metadata(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     depends_on: Option<&[String]>,
     conflicts_with: Option<&[String]>,
@@ -252,7 +274,7 @@ pub async fn update_task_metadata(
     unblock_value: Option<i64>,
     plan_version: Option<Option<&str>>,
 ) -> Result<Task> {
-    let task = get_task(pool, id)
+    let task = get_task(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Task '{}' not found", id))?;
     let current = task_runtime_metadata(&task);
@@ -267,7 +289,7 @@ pub async fn update_task_metadata(
     let lock_requirements_json = serde_json::to_string(&normalized_locks)?;
     let now = Utc::now().to_rfc3339();
     sqlx::query(
-        "UPDATE tasks SET depends_on = ?, conflicts_with = ?, lock_set = ?, lock_requirements = ?, priority = ?, risk_level = ?, execution_bucket = ?, estimate_points = ?, unblock_value = ?, plan_version = ?, updated_at = ? WHERE id = ?"
+        "UPDATE tasks SET depends_on = ?, conflicts_with = ?, lock_set = ?, lock_requirements = ?, priority = ?, risk_level = ?, execution_bucket = ?, estimate_points = ?, unblock_value = ?, plan_version = ?, updated_at = ? WHERE project_dir = ? AND id = ?"
     )
     .bind(&depends_json)
     .bind(&conflicts_json)
@@ -280,10 +302,11 @@ pub async fn update_task_metadata(
     .bind(unblock_value.unwrap_or(current.unblock_value))
     .bind(plan_version.unwrap_or(task.plan_version.as_deref()))
     .bind(&now)
+    .bind(project_dir)
     .bind(id)
     .execute(pool)
     .await?;
-    get_task(pool, id)
+    get_task(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Task '{}' not found after metadata update", id))
 }

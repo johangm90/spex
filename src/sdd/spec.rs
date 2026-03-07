@@ -66,6 +66,7 @@ pub struct Spec {
 
 pub async fn create_spec(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     title: &str,
     priority: &str,
@@ -75,10 +76,11 @@ pub async fn create_spec(
     let depends_json = serde_json::to_string(depends_on)?;
 
     sqlx::query(
-        "INSERT INTO specs (id, title, status, priority, depends_on, agents, ac_total, ac_passed, created_at, updated_at) \
-         VALUES (?, ?, 'draft', ?, ?, '[]', 0, 0, ?, ?)",
+        "INSERT INTO specs (id, project_dir, title, status, priority, depends_on, agents, ac_total, ac_passed, created_at, updated_at) \
+         VALUES (?, ?, ?, 'draft', ?, ?, '[]', 0, 0, ?, ?)",
     )
     .bind(id)
+    .bind(project_dir)
     .bind(title)
     .bind(priority)
     .bind(&depends_json)
@@ -87,16 +89,17 @@ pub async fn create_spec(
     .execute(pool)
     .await?;
 
-    get_spec(pool, id)
+    get_spec(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Failed to create spec"))
 }
 
-pub async fn get_spec(pool: &SqlitePool, id: &str) -> Result<Option<Spec>> {
+pub async fn get_spec(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<Option<Spec>> {
     let row = sqlx::query_as::<_, (String, String, String, String, String, String, i64, i64, String, String, Option<String>)>(
         "SELECT id, title, status, priority, depends_on, agents, ac_total, ac_passed, created_at, updated_at, updated_by \
-         FROM specs WHERE id = ?",
+         FROM specs WHERE project_dir = ? AND id = ?",
     )
+    .bind(project_dir)
     .bind(id)
     .fetch_optional(pool)
     .await?;
@@ -132,11 +135,12 @@ pub async fn get_spec(pool: &SqlitePool, id: &str) -> Result<Option<Spec>> {
     ))
 }
 
-pub async fn list_specs(pool: &SqlitePool) -> Result<Vec<Spec>> {
+pub async fn list_specs(pool: &SqlitePool, project_dir: &str) -> Result<Vec<Spec>> {
     let rows = sqlx::query_as::<_, (String, String, String, String, String, String, i64, i64, String, String, Option<String>)>(
         "SELECT id, title, status, priority, depends_on, agents, ac_total, ac_passed, created_at, updated_at, updated_by \
-         FROM specs ORDER BY id",
+         FROM specs WHERE project_dir = ? ORDER BY id",
     )
+    .bind(project_dir)
     .fetch_all(pool)
     .await?;
 
@@ -211,61 +215,77 @@ fn validate_transition(from: &str, to: &str) -> Result<()> {
 
 pub async fn update_spec_status(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     new_status: &str,
     updated_by: &str,
 ) -> Result<Spec> {
-    let spec = get_spec(pool, id)
+    let spec = get_spec(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Spec '{}' not found", id))?;
 
     validate_transition(&spec.status, new_status)?;
 
     let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE specs SET status = ?, updated_at = ?, updated_by = ? WHERE id = ?")
-        .bind(new_status)
-        .bind(&now)
-        .bind(updated_by)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE specs SET status = ?, updated_at = ?, updated_by = ? WHERE project_dir = ? AND id = ?",
+    )
+    .bind(new_status)
+    .bind(&now)
+    .bind(updated_by)
+    .bind(project_dir)
+    .bind(id)
+    .execute(pool)
+    .await?;
 
-    get_spec(pool, id)
+    get_spec(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Spec '{}' not found after update", id))
 }
 
 pub async fn update_spec_ac(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     ac_total: i64,
     ac_passed: i64,
 ) -> Result<Spec> {
     let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE specs SET ac_total = ?, ac_passed = ?, updated_at = ? WHERE id = ?")
-        .bind(ac_total)
-        .bind(ac_passed)
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE specs SET ac_total = ?, ac_passed = ?, updated_at = ? WHERE project_dir = ? AND id = ?",
+    )
+    .bind(ac_total)
+    .bind(ac_passed)
+    .bind(&now)
+    .bind(project_dir)
+    .bind(id)
+    .execute(pool)
+    .await?;
 
-    get_spec(pool, id)
+    get_spec(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Spec '{}' not found", id))
 }
 
-pub async fn update_spec_agents(pool: &SqlitePool, id: &str, agents: &[String]) -> Result<Spec> {
+pub async fn update_spec_agents(
+    pool: &SqlitePool,
+    project_dir: &str,
+    id: &str,
+    agents: &[String],
+) -> Result<Spec> {
     let now = Utc::now().to_rfc3339();
     let agents_json = serde_json::to_string(agents)?;
-    sqlx::query("UPDATE specs SET agents = ?, updated_at = ? WHERE id = ?")
-        .bind(&agents_json)
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE specs SET agents = ?, updated_at = ? WHERE project_dir = ? AND id = ?",
+    )
+    .bind(&agents_json)
+    .bind(&now)
+    .bind(project_dir)
+    .bind(id)
+    .execute(pool)
+    .await?;
 
-    get_spec(pool, id)
+    get_spec(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Spec '{}' not found", id))
 }
