@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::Colorize;
 use std::path::Path;
 
-use crate::sdd::db::{ensure_spex_dir, get_db_path, open_db};
+use crate::sdd::db::ensure_spex_dir;
 use crate::tool_target::ToolTarget;
 
 /// Write the spex-state MCP entry into each detected tool's global config file.
@@ -64,7 +64,7 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
     if !gitignore_path.exists() {
         std::fs::write(
             &gitignore_path,
-            ".spex/state.db\n.spex/*.db\ntarget/\nnode_modules/\n",
+            "target/\nnode_modules/\n",
         )?;
         println!("  {} .gitignore", "created".green());
     }
@@ -127,24 +127,16 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
         );
     }
 
-    // 8. Initialize the SQLite database (runs migrations)
-    let db_path = get_db_path(dir);
-    let _pool = open_db(&db_path).await?;
-    println!("  {} .spex/state.db", "created".green());
-
     println!();
     println!("{} Project {} created!", "✓".green().bold(), name.cyan());
     println!();
 
-    // Print project isolation note
+    // Print global DB note
     println!(
-        "{}  Project isolation: spex mcp serve reads .spex/state.db from the directory where your",
-        "ℹ".blue()
-    );
-    println!(
-        "   tool is launched. Set {}={} in the MCP config env if needed.",
-        "SPEX_PROJECT_DIR".cyan(),
-        "<path>".dimmed()
+        "{}  Global DB will be created at {} on first {}.",
+        "ℹ".blue(),
+        "~/.local/share/spex/global-state.db".cyan(),
+        "spex mcp serve".cyan()
     );
     println!();
 
@@ -200,15 +192,15 @@ pub async fn init_project(dir: &Path) -> Result<()> {
 
     // 2. Append to .gitignore (never overwrite)
     let gitignore_path = dir.join(".gitignore");
-    let spex_entry = ".spex/state.db\n.spex/*.db\n";
+    let spex_entry = "# spex marker\n.spex/\n";
     if gitignore_path.exists() {
         let existing = std::fs::read_to_string(&gitignore_path)?;
-        if !existing.contains(".spex/state.db") {
+        if !existing.contains(".spex/") {
             let mut f = std::fs::OpenOptions::new()
                 .append(true)
                 .open(&gitignore_path)?;
             use std::io::Write;
-            write!(f, "\n# spex state\n{}", spex_entry)?;
+            write!(f, "\n# spex\n{}", spex_entry)?;
             println!(
                 "  {} .gitignore (appended spex entries)",
                 "updated".yellow()
@@ -289,11 +281,6 @@ pub async fn init_project(dir: &Path) -> Result<()> {
         );
     }
 
-    // 6. Initialise the SQLite database (runs migrations)
-    let db_path = get_db_path(dir);
-    let _pool = open_db(&db_path).await?;
-    println!("  {} .spex/state.db", "created".green());
-
     println!();
     println!(
         "{} spex initialised in {}",
@@ -302,15 +289,12 @@ pub async fn init_project(dir: &Path) -> Result<()> {
     );
     println!();
 
-    // Print project isolation note
+    // Print global DB note
     println!(
-        "{}  Project isolation: spex mcp serve reads .spex/state.db from the directory where your",
-        "ℹ".blue()
-    );
-    println!(
-        "   tool is launched. Set {}={} in the MCP config env if needed.",
-        "SPEX_PROJECT_DIR".cyan(),
-        "<path>".dimmed()
+        "{}  Global DB will be created at {} on first {}.",
+        "ℹ".blue(),
+        "~/.local/share/spex/global-state.db".cyan(),
+        "spex mcp serve".cyan()
     );
     println!();
 

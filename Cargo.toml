@@ -12,6 +12,10 @@ categories = ["command-line-utilities", "development-tools"]
 name = "spex"
 path = "src/main.rs"
 
+[lib]
+name = "spex"
+path = "src/lib.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive", "color", "cargo", "env"] }
 tokio = { version = "1", features = ["full"] }

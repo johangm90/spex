@@ -1,3 +1,4 @@
+pub mod db_cmd;
 pub mod doctor;
 pub mod mcp_cmd;
 pub mod ops;

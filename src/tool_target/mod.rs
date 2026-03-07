@@ -1,6 +1,19 @@
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
+/// Returns the OpenCode config directory: `~/.config/opencode`.
+///
+/// Always uses `~/.config` (XDG convention) regardless of platform,
+/// because OpenCode hard-codes this path on all platforms including macOS.
+pub fn opencode_config_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".config").join("opencode"))
+}
+
+/// Returns `~/.copilot` (GitHub Copilot CLI config directory).
+pub fn copilot_config_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".copilot"))
+}
+
 /// Supported AI coding tool targets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolTarget {
@@ -17,11 +30,11 @@ impl ToolTarget {
         }
     }
 
-    /// Root config directory for this tool (~/.config/opencode or ~/.copilot).
+    /// Root config directory for this tool (`~/.config/opencode` or `~/.copilot`).
     pub fn config_dir(&self) -> Option<PathBuf> {
         match self {
-            ToolTarget::OpenCode => crate::cli::util::opencode_config_dir(),
-            ToolTarget::CopilotCli => crate::cli::util::copilot_config_dir(),
+            ToolTarget::OpenCode => opencode_config_dir(),
+            ToolTarget::CopilotCli => copilot_config_dir(),
         }
     }
 
