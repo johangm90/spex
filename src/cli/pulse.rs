@@ -8,15 +8,21 @@ use crate::sdd::{
 
 use super::util::colorize_status;
 
-pub async fn cmd_pulse(pool: &SqlitePool, since: Option<&str>, until: Option<&str>) -> Result<()> {
-    let specs = list_specs(pool).await?;
-    let all_tasks = list_tasks(pool, None).await?;
+pub async fn cmd_pulse(
+    pool: &SqlitePool,
+    project_dir: &str,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> Result<()> {
+    let specs = list_specs(pool, project_dir).await?;
+    let all_tasks = list_tasks(pool, project_dir, None).await?;
     let limit = if since.is_some() || until.is_some() {
         None
     } else {
         Some(10)
     };
-    let recent_events = query_events(pool, None, None, None, limit, since, until).await?;
+    let recent_events =
+        query_events(pool, project_dir, None, None, None, limit, since, until).await?;
 
     println!(
         "{}",
@@ -70,7 +76,7 @@ pub async fn cmd_pulse(pool: &SqlitePool, since: Option<&str>, until: Option<&st
             let total = spec_tasks.len();
             let done = spec_tasks.iter().filter(|t| t.status == "done").count();
 
-            let ops = summarize_spec_operations(pool, &spec.id).await?;
+            let ops = summarize_spec_operations(pool, project_dir, &spec.id).await?;
             total_blocking_incidents += ops.summary.blocking_incidents;
             total_blocking_gaps += ops.summary.blocking_context_gaps;
             total_active_interrupts += ops.summary.active_interrupts;

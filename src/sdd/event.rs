@@ -36,6 +36,7 @@ pub async fn emit_event(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn query_events(
     pool: &SqlitePool,
     project_dir: &str,

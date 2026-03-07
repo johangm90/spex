@@ -22,6 +22,7 @@ pub struct Memory {
     pub revision_count: i64,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn memory_set(
     pool: &SqlitePool,
     project_dir: &str,

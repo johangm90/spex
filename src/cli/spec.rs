@@ -11,8 +11,14 @@ use crate::sdd::{
 
 use super::util::colorize_status;
 
-pub async fn cmd_spec_add(pool: &SqlitePool, id: &str, title: &str, priority: &str) -> Result<()> {
-    let spec = create_spec(pool, id, title, priority, &[]).await?;
+pub async fn cmd_spec_add(
+    pool: &SqlitePool,
+    project_dir: &str,
+    id: &str,
+    title: &str,
+    priority: &str,
+) -> Result<()> {
+    let spec = create_spec(pool, project_dir, id, title, priority, &[]).await?;
     println!(
         "{} Spec {} created: {}",
         "✓".green(),
@@ -27,15 +33,15 @@ pub async fn cmd_spec_add(pool: &SqlitePool, id: &str, title: &str, priority: &s
     Ok(())
 }
 
-pub async fn cmd_spec_approve(pool: &SqlitePool, id: &str) -> Result<()> {
-    let spec = update_spec_status(pool, id, "approved", "human").await?;
-    emit_event(pool, "SpecApproved", Some(id), Some("human"), "{}").await?;
+pub async fn cmd_spec_approve(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let spec = update_spec_status(pool, project_dir, id, "approved", "human").await?;
+    emit_event(pool, project_dir, "SpecApproved", Some(id), Some("human"), "{}").await?;
     println!("{} Spec {} approved.", "✓".green().bold(), spec.id.cyan());
     Ok(())
 }
 
-pub async fn cmd_spec_start(pool: &SqlitePool, id: &str) -> Result<()> {
-    let ops = summarize_spec_operations(pool, id).await?;
+pub async fn cmd_spec_start(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let ops = summarize_spec_operations(pool, project_dir, id).await?;
     if ops.summary.blocking_incidents > 0 || ops.summary.blocking_context_gaps > 0 {
         return Err(anyhow::anyhow!(
             "Spec '{}' has blocking operational records ({} incidents, {} context gaps); resolve them before starting.",
@@ -44,8 +50,8 @@ pub async fn cmd_spec_start(pool: &SqlitePool, id: &str) -> Result<()> {
             ops.summary.blocking_context_gaps
         ));
     }
-    let spec = update_spec_status(pool, id, "in_progress", "human").await?;
-    emit_event(pool, "SpecStarted", Some(id), Some("human"), "{}").await?;
+    let spec = update_spec_status(pool, project_dir, id, "in_progress", "human").await?;
+    emit_event(pool, project_dir, "SpecStarted", Some(id), Some("human"), "{}").await?;
     println!(
         "{} Spec {} is now {}.",
         "✓".green(),
@@ -55,8 +61,8 @@ pub async fn cmd_spec_start(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_spec_stabilize(pool: &SqlitePool, id: &str) -> Result<()> {
-    let ops = summarize_spec_operations(pool, id).await?;
+pub async fn cmd_spec_stabilize(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let ops = summarize_spec_operations(pool, project_dir, id).await?;
     if ops.summary.blocking_incidents > 0 || ops.summary.blocking_context_gaps > 0 {
         return Err(anyhow::anyhow!(
             "Spec '{}' cannot enter stabilizing with blockers ({} incidents, {} context gaps).",
@@ -65,8 +71,16 @@ pub async fn cmd_spec_stabilize(pool: &SqlitePool, id: &str) -> Result<()> {
             ops.summary.blocking_context_gaps
         ));
     }
-    let spec = update_spec_status(pool, id, "stabilizing", "human").await?;
-    emit_event(pool, "SpecStabilizing", Some(id), Some("human"), "{}").await?;
+    let spec = update_spec_status(pool, project_dir, id, "stabilizing", "human").await?;
+    emit_event(
+        pool,
+        project_dir,
+        "SpecStabilizing",
+        Some(id),
+        Some("human"),
+        "{}",
+    )
+    .await?;
     println!(
         "{} Spec {} is now {}.",
         "✓".green(),
@@ -76,8 +90,8 @@ pub async fn cmd_spec_stabilize(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_spec_done(pool: &SqlitePool, id: &str) -> Result<()> {
-    let ops = summarize_spec_operations(pool, id).await?;
+pub async fn cmd_spec_done(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let ops = summarize_spec_operations(pool, project_dir, id).await?;
     if ops.summary.blocking_incidents > 0
         || ops.summary.blocking_context_gaps > 0
         || ops.summary.verification_failures > 0
@@ -90,8 +104,16 @@ pub async fn cmd_spec_done(pool: &SqlitePool, id: &str) -> Result<()> {
             ops.summary.verification_failures
         ));
     }
-    let spec = update_spec_status(pool, id, "done", "human").await?;
-    emit_event(pool, "SpecCompleted", Some(id), Some("human"), "{}").await?;
+    let spec = update_spec_status(pool, project_dir, id, "done", "human").await?;
+    emit_event(
+        pool,
+        project_dir,
+        "SpecCompleted",
+        Some(id),
+        Some("human"),
+        "{}",
+    )
+    .await?;
     println!(
         "{} Spec {} is {}!",
         "✓".green().bold(),
@@ -101,8 +123,8 @@ pub async fn cmd_spec_done(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_spec_list(pool: &SqlitePool, json: bool) -> Result<()> {
-    let specs = list_specs(pool).await?;
+pub async fn cmd_spec_list(pool: &SqlitePool, project_dir: &str, json: bool) -> Result<()> {
+    let specs = list_specs(pool, project_dir).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&specs)?);
@@ -145,8 +167,8 @@ pub async fn cmd_spec_list(pool: &SqlitePool, json: bool) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_spec_show(pool: &SqlitePool, id: &str) -> Result<()> {
-    let spec = get_spec(pool, id)
+pub async fn cmd_spec_show(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let spec = get_spec(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Spec '{}' not found", id))?;
 
@@ -160,7 +182,7 @@ pub async fn cmd_spec_show(pool: &SqlitePool, id: &str) -> Result<()> {
         colorize_status(&spec.status),
         spec.priority
     );
-    let ops = summarize_spec_operations(pool, id).await?;
+    let ops = summarize_spec_operations(pool, project_dir, id).await?;
     println!(
         "  Ops:      {} open incidents ({} blocking) | {} open gaps ({} blocking) | {} active interrupts | {} failing verifications",
         ops.summary.open_incidents,
@@ -193,7 +215,7 @@ pub async fn cmd_spec_show(pool: &SqlitePool, id: &str) -> Result<()> {
     }
 
     println!();
-    let tasks = list_tasks(pool, Some(id)).await?;
+    let tasks = list_tasks(pool, project_dir, Some(id)).await?;
     if !ops.next_actionable_tasks.is_empty() {
         println!("  {}", "Next actionable tasks:".bold());
         for task in ops.next_actionable_tasks.iter().take(5) {

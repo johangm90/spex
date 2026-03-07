@@ -15,6 +15,7 @@ use super::util::colorize_status;
 #[allow(clippy::too_many_arguments)]
 pub async fn cmd_incident_add(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec: &str,
     task: Option<&str>,
@@ -26,6 +27,7 @@ pub async fn cmd_incident_add(
 ) -> Result<()> {
     let incident = create_incident(
         pool,
+        project_dir,
         id,
         spec,
         task,
@@ -47,11 +49,12 @@ pub async fn cmd_incident_add(
 
 pub async fn cmd_incident_list(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     status: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let incidents = list_incidents(pool, spec, status).await?;
+    let incidents = list_incidents(pool, project_dir, spec, status).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&incidents)?);
         return Ok(());
@@ -91,8 +94,8 @@ pub async fn cmd_incident_list(
     Ok(())
 }
 
-pub async fn cmd_incident_show(pool: &SqlitePool, id: &str) -> Result<()> {
-    let item = get_incident(pool, id)
+pub async fn cmd_incident_show(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let item = get_incident(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Incident '{}' not found", id))?;
     println!(
@@ -132,13 +135,15 @@ pub async fn cmd_incident_show(pool: &SqlitePool, id: &str) -> Result<()> {
 
 pub async fn cmd_incident_update(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     status: Option<&str>,
     blocking: Option<bool>,
     root_cause: Option<&str>,
     fix_strategy: Option<&str>,
 ) -> Result<()> {
-    let item = update_incident(pool, id, status, blocking, root_cause, fix_strategy).await?;
+    let item =
+        update_incident(pool, project_dir, id, status, blocking, root_cause, fix_strategy).await?;
     println!(
         "{} Incident {} updated to {}",
         "✓".green(),
@@ -151,6 +156,7 @@ pub async fn cmd_incident_update(
 #[allow(clippy::too_many_arguments)]
 pub async fn cmd_gap_add(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec: &str,
     task: Option<&str>,
@@ -162,6 +168,7 @@ pub async fn cmd_gap_add(
 ) -> Result<()> {
     let gap = create_context_gap(
         pool,
+        project_dir,
         id,
         spec,
         task,
@@ -183,11 +190,12 @@ pub async fn cmd_gap_add(
 
 pub async fn cmd_gap_list(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     status: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let gaps = list_context_gaps(pool, spec, status).await?;
+    let gaps = list_context_gaps(pool, project_dir, spec, status).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&gaps)?);
         return Ok(());
@@ -227,8 +235,8 @@ pub async fn cmd_gap_list(
     Ok(())
 }
 
-pub async fn cmd_gap_show(pool: &SqlitePool, id: &str) -> Result<()> {
-    let item = get_context_gap(pool, id)
+pub async fn cmd_gap_show(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let item = get_context_gap(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Context gap '{}' not found", id))?;
     println!(
@@ -265,13 +273,15 @@ pub async fn cmd_gap_show(pool: &SqlitePool, id: &str) -> Result<()> {
 
 pub async fn cmd_gap_update(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     status: Option<&str>,
     blocking: Option<bool>,
     assumption: Option<&str>,
     resolution: Option<&str>,
 ) -> Result<()> {
-    let item = update_context_gap(pool, id, status, blocking, assumption, resolution).await?;
+    let item =
+        update_context_gap(pool, project_dir, id, status, blocking, assumption, resolution).await?;
     println!(
         "{} Context gap {} updated to {}",
         "✓".green(),
@@ -284,6 +294,7 @@ pub async fn cmd_gap_update(
 #[allow(clippy::too_many_arguments)]
 pub async fn cmd_verify_add(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec: &str,
     task: Option<&str>,
@@ -295,7 +306,17 @@ pub async fn cmd_verify_add(
     evidence: Option<&str>,
 ) -> Result<()> {
     let run = create_verification_run(
-        pool, id, spec, task, slice, kind, status, command, summary, evidence,
+        pool,
+        project_dir,
+        id,
+        spec,
+        task,
+        slice,
+        kind,
+        status,
+        command,
+        summary,
+        evidence,
     )
     .await?;
     println!(
@@ -309,12 +330,13 @@ pub async fn cmd_verify_add(
 
 pub async fn cmd_verify_list(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     task: Option<&str>,
     status: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let runs = list_verification_runs(pool, spec, task, status).await?;
+    let runs = list_verification_runs(pool, project_dir, spec, task, status).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&runs)?);
         return Ok(());
@@ -344,8 +366,8 @@ pub async fn cmd_verify_list(
     Ok(())
 }
 
-pub async fn cmd_verify_show(pool: &SqlitePool, id: &str) -> Result<()> {
-    let item = get_verification_run(pool, id)
+pub async fn cmd_verify_show(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let item = get_verification_run(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Verification run '{}' not found", id))?;
     println!(
@@ -376,13 +398,23 @@ pub async fn cmd_verify_show(pool: &SqlitePool, id: &str) -> Result<()> {
 
 pub async fn cmd_interrupt_add(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec: &str,
     reason_type: &str,
     preempted_tasks: &[String],
     resume_hint: Option<&str>,
 ) -> Result<()> {
-    let item = create_interrupt(pool, id, spec, reason_type, preempted_tasks, resume_hint).await?;
+    let item = create_interrupt(
+        pool,
+        project_dir,
+        id,
+        spec,
+        reason_type,
+        preempted_tasks,
+        resume_hint,
+    )
+    .await?;
     println!(
         "{} Interrupt {} created for {}",
         "✓".green(),
@@ -394,11 +426,12 @@ pub async fn cmd_interrupt_add(
 
 pub async fn cmd_interrupt_list(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     status: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let items = list_interrupts(pool, spec, status).await?;
+    let items = list_interrupts(pool, project_dir, spec, status).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&items)?);
         return Ok(());
@@ -426,8 +459,8 @@ pub async fn cmd_interrupt_list(
     Ok(())
 }
 
-pub async fn cmd_interrupt_show(pool: &SqlitePool, id: &str) -> Result<()> {
-    let item = get_interrupt(pool, id)
+pub async fn cmd_interrupt_show(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let item = get_interrupt(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Interrupt '{}' not found", id))?;
     println!(
@@ -446,11 +479,12 @@ pub async fn cmd_interrupt_show(pool: &SqlitePool, id: &str) -> Result<()> {
 
 pub async fn cmd_interrupt_update(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     status: Option<&str>,
     resume_hint: Option<&str>,
 ) -> Result<()> {
-    let item = update_interrupt(pool, id, status, resume_hint).await?;
+    let item = update_interrupt(pool, project_dir, id, status, resume_hint).await?;
     println!(
         "{} Interrupt {} updated to {}",
         "✓".green(),
@@ -463,6 +497,7 @@ pub async fn cmd_interrupt_update(
 #[allow(clippy::too_many_arguments)]
 pub async fn cmd_handoff_add(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec: &str,
     interrupt: Option<&str>,
@@ -475,6 +510,7 @@ pub async fn cmd_handoff_add(
 ) -> Result<()> {
     let item = create_handoff_snapshot(
         pool,
+        project_dir,
         id,
         spec,
         interrupt,
@@ -495,8 +531,13 @@ pub async fn cmd_handoff_add(
     Ok(())
 }
 
-pub async fn cmd_handoff_list(pool: &SqlitePool, spec: Option<&str>, json: bool) -> Result<()> {
-    let items = list_handoff_snapshots(pool, spec).await?;
+pub async fn cmd_handoff_list(
+    pool: &SqlitePool,
+    project_dir: &str,
+    spec: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let items = list_handoff_snapshots(pool, project_dir, spec).await?;
     if json {
         println!("{}", serde_json::to_string_pretty(&items)?);
         return Ok(());
@@ -528,8 +569,8 @@ pub async fn cmd_handoff_list(pool: &SqlitePool, spec: Option<&str>, json: bool)
     Ok(())
 }
 
-pub async fn cmd_handoff_show(pool: &SqlitePool, id: &str) -> Result<()> {
-    let item = get_handoff_snapshot(pool, id)
+pub async fn cmd_handoff_show(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let item = get_handoff_snapshot(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Handoff snapshot '{}' not found", id))?;
     println!(

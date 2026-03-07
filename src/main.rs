@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 
 use cli::{
     doctor::cmd_doctor,
-    mcp_cmd::{cmd_mcp_serve, cmd_mcp_setup},
+    mcp_cmd::{cmd_mcp_serve, cmd_mcp_setup, resolve_project_dir},
     ops::{
         cmd_gap_add, cmd_gap_list, cmd_gap_show, cmd_gap_update, cmd_handoff_add, cmd_handoff_list,
         cmd_handoff_show, cmd_incident_add, cmd_incident_list, cmd_incident_show,
@@ -641,32 +641,38 @@ async fn main() -> Result<()> {
 
         Commands::Spec { cmd } => {
             let pool = open_project_db().await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
             match cmd {
                 SpecCmd::Add {
                     id,
                     title,
                     priority,
-                } => cmd_spec_add(&pool, &id, &title, &priority).await?,
-                SpecCmd::Approve { id } => cmd_spec_approve(&pool, &id).await?,
-                SpecCmd::Start { id } => cmd_spec_start(&pool, &id).await?,
-                SpecCmd::Stabilize { id } => cmd_spec_stabilize(&pool, &id).await?,
-                SpecCmd::Done { id } => cmd_spec_done(&pool, &id).await?,
-                SpecCmd::List { json } => cmd_spec_list(&pool, json).await?,
-                SpecCmd::Show { id } => cmd_spec_show(&pool, &id).await?,
+                } => cmd_spec_add(&pool, &project_dir, &id, &title, &priority).await?,
+                SpecCmd::Approve { id } => cmd_spec_approve(&pool, &project_dir, &id).await?,
+                SpecCmd::Start { id } => cmd_spec_start(&pool, &project_dir, &id).await?,
+                SpecCmd::Stabilize { id } => cmd_spec_stabilize(&pool, &project_dir, &id).await?,
+                SpecCmd::Done { id } => cmd_spec_done(&pool, &project_dir, &id).await?,
+                SpecCmd::List { json } => cmd_spec_list(&pool, &project_dir, json).await?,
+                SpecCmd::Show { id } => cmd_spec_show(&pool, &project_dir, &id).await?,
             }
         }
 
         Commands::Plan { cmd } => {
             let pool = open_project_db().await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
             match cmd {
-                PlanCmd::Build { spec_id } => cmd_plan_build(&pool, &spec_id).await?,
-                PlanCmd::Show { spec_id } => cmd_plan_show(&pool, &spec_id).await?,
-                PlanCmd::Dag { spec_id } => cmd_plan_dag(&pool, &spec_id).await?,
+                PlanCmd::Build { spec_id } => cmd_plan_build(&pool, &project_dir, &spec_id).await?,
+                PlanCmd::Show { spec_id } => cmd_plan_show(&pool, &project_dir, &spec_id).await?,
+                PlanCmd::Dag { spec_id } => cmd_plan_dag(&pool, &project_dir, &spec_id).await?,
             }
         }
 
         Commands::Task { cmd } => {
             let pool = open_project_db().await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
             match cmd {
                 TaskCmd::Add {
                     spec_id,
@@ -687,6 +693,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_task_add(
                         &pool,
+                        &project_dir,
                         &spec_id,
                         &task_id,
                         &title,
@@ -705,20 +712,22 @@ async fn main() -> Result<()> {
                     )
                     .await?
                 }
-                TaskCmd::Start { id } => cmd_task_start(&pool, &id).await?,
-                TaskCmd::Block { id } => cmd_task_block(&pool, &id).await?,
-                TaskCmd::Review { id } => cmd_task_review(&pool, &id).await?,
-                TaskCmd::Verify { id } => cmd_task_verify(&pool, &id).await?,
-                TaskCmd::Done { id } => cmd_task_done(&pool, &id).await?,
-                TaskCmd::Cancel { id } => cmd_task_cancel(&pool, &id).await?,
+                TaskCmd::Start { id } => cmd_task_start(&pool, &project_dir, &id).await?,
+                TaskCmd::Block { id } => cmd_task_block(&pool, &project_dir, &id).await?,
+                TaskCmd::Review { id } => cmd_task_review(&pool, &project_dir, &id).await?,
+                TaskCmd::Verify { id } => cmd_task_verify(&pool, &project_dir, &id).await?,
+                TaskCmd::Done { id } => cmd_task_done(&pool, &project_dir, &id).await?,
+                TaskCmd::Cancel { id } => cmd_task_cancel(&pool, &project_dir, &id).await?,
                 TaskCmd::List { spec_id, json } => {
-                    cmd_task_list(&pool, spec_id.as_deref(), json).await?
+                    cmd_task_list(&pool, &project_dir, spec_id.as_deref(), json).await?
                 }
             }
         }
 
         Commands::Incident { cmd } => {
             let pool = open_project_db().await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
             match cmd {
                 IncidentCmd::Add {
                     id,
@@ -732,6 +741,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_incident_add(
                         &pool,
+                        &project_dir,
                         &id,
                         &spec,
                         task.as_deref(),
@@ -743,7 +753,7 @@ async fn main() -> Result<()> {
                     )
                     .await?
                 }
-                IncidentCmd::Show { id } => cmd_incident_show(&pool, &id).await?,
+                IncidentCmd::Show { id } => cmd_incident_show(&pool, &project_dir, &id).await?,
                 IncidentCmd::Update {
                     id,
                     status,
@@ -753,6 +763,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_incident_update(
                         &pool,
+                        &project_dir,
                         &id,
                         status.as_deref(),
                         blocking,
@@ -762,13 +773,16 @@ async fn main() -> Result<()> {
                     .await?
                 }
                 IncidentCmd::List { spec, status, json } => {
-                    cmd_incident_list(&pool, spec.as_deref(), status.as_deref(), json).await?
+                    cmd_incident_list(&pool, &project_dir, spec.as_deref(), status.as_deref(), json)
+                        .await?
                 }
             }
         }
 
         Commands::Gap { cmd } => {
             let pool = open_project_db().await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
             match cmd {
                 GapCmd::Add {
                     id,
@@ -782,6 +796,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_gap_add(
                         &pool,
+                        &project_dir,
                         &id,
                         &spec,
                         task.as_deref(),
@@ -793,7 +808,7 @@ async fn main() -> Result<()> {
                     )
                     .await?
                 }
-                GapCmd::Show { id } => cmd_gap_show(&pool, &id).await?,
+                GapCmd::Show { id } => cmd_gap_show(&pool, &project_dir, &id).await?,
                 GapCmd::Update {
                     id,
                     status,
@@ -803,6 +818,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_gap_update(
                         &pool,
+                        &project_dir,
                         &id,
                         status.as_deref(),
                         blocking,
@@ -812,13 +828,16 @@ async fn main() -> Result<()> {
                     .await?
                 }
                 GapCmd::List { spec, status, json } => {
-                    cmd_gap_list(&pool, spec.as_deref(), status.as_deref(), json).await?
+                    cmd_gap_list(&pool, &project_dir, spec.as_deref(), status.as_deref(), json)
+                        .await?
                 }
             }
         }
 
         Commands::Verify { cmd } => {
             let pool = open_project_db().await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
             match cmd {
                 VerifyCmd::Add {
                     id,
@@ -833,6 +852,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_verify_add(
                         &pool,
+                        &project_dir,
                         &id,
                         &spec,
                         task.as_deref(),
@@ -845,7 +865,7 @@ async fn main() -> Result<()> {
                     )
                     .await?
                 }
-                VerifyCmd::Show { id } => cmd_verify_show(&pool, &id).await?,
+                VerifyCmd::Show { id } => cmd_verify_show(&pool, &project_dir, &id).await?,
                 VerifyCmd::List {
                     spec,
                     task,
@@ -854,6 +874,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_verify_list(
                         &pool,
+                        &project_dir,
                         spec.as_deref(),
                         task.as_deref(),
                         status.as_deref(),
@@ -866,6 +887,8 @@ async fn main() -> Result<()> {
 
         Commands::Interrupt { cmd } => {
             let pool = open_project_db().await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
             match cmd {
                 InterruptCmd::Add {
                     id,
@@ -876,6 +899,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_interrupt_add(
                         &pool,
+                        &project_dir,
                         &id,
                         &spec,
                         &reason_type,
@@ -884,23 +908,38 @@ async fn main() -> Result<()> {
                     )
                     .await?
                 }
-                InterruptCmd::Show { id } => cmd_interrupt_show(&pool, &id).await?,
+                InterruptCmd::Show { id } => cmd_interrupt_show(&pool, &project_dir, &id).await?,
                 InterruptCmd::Update {
                     id,
                     status,
                     resume_hint,
                 } => {
-                    cmd_interrupt_update(&pool, &id, status.as_deref(), resume_hint.as_deref())
-                        .await?
+                    cmd_interrupt_update(
+                        &pool,
+                        &project_dir,
+                        &id,
+                        status.as_deref(),
+                        resume_hint.as_deref(),
+                    )
+                    .await?
                 }
                 InterruptCmd::List { spec, status, json } => {
-                    cmd_interrupt_list(&pool, spec.as_deref(), status.as_deref(), json).await?
+                    cmd_interrupt_list(
+                        &pool,
+                        &project_dir,
+                        spec.as_deref(),
+                        status.as_deref(),
+                        json,
+                    )
+                    .await?
                 }
             }
         }
 
         Commands::Handoff { cmd } => {
             let pool = open_project_db().await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
             match cmd {
                 HandoffCmd::Add {
                     id,
@@ -915,6 +954,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_handoff_add(
                         &pool,
+                        &project_dir,
                         &id,
                         &spec,
                         interrupt.as_deref(),
@@ -927,18 +967,20 @@ async fn main() -> Result<()> {
                     )
                     .await?
                 }
-                HandoffCmd::Show { id } => cmd_handoff_show(&pool, &id).await?,
+                HandoffCmd::Show { id } => cmd_handoff_show(&pool, &project_dir, &id).await?,
                 HandoffCmd::List { spec, json } => {
-                    cmd_handoff_list(&pool, spec.as_deref(), json).await?
+                    cmd_handoff_list(&pool, &project_dir, spec.as_deref(), json).await?
                 }
             }
         }
 
         Commands::Orchestrate { cmd } => {
             let pool = open_project_db().await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
             match cmd {
                 OrchestrateCmd::Next { spec, agent } => {
-                    cmd_orchestrate_next(&pool, &spec, &agent).await?
+                    cmd_orchestrate_next(&pool, &project_dir, &spec, &agent).await?
                 }
                 OrchestrateCmd::Claim {
                     task,
@@ -947,8 +989,16 @@ async fn main() -> Result<()> {
                     auto_lock,
                     ttl,
                 } => {
-                    cmd_orchestrate_claim(&pool, spec.as_deref(), &task, &agent, auto_lock, ttl)
-                        .await?
+                    cmd_orchestrate_claim(
+                        &pool,
+                        &project_dir,
+                        spec.as_deref(),
+                        &task,
+                        &agent,
+                        auto_lock,
+                        ttl,
+                    )
+                    .await?
                 }
                 OrchestrateCmd::Heartbeat {
                     task,
@@ -958,6 +1008,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_orchestrate_heartbeat(
                         &pool,
+                        &project_dir,
                         spec.as_deref(),
                         &task,
                         ttl,
@@ -970,19 +1021,37 @@ async fn main() -> Result<()> {
                     spec,
                     final_status,
                 } => {
-                    cmd_orchestrate_release(&pool, spec.as_deref(), &task, final_status.as_deref())
-                        .await?
+                    cmd_orchestrate_release(
+                        &pool,
+                        &project_dir,
+                        spec.as_deref(),
+                        &task,
+                        final_status.as_deref(),
+                    )
+                    .await?
                 }
-                OrchestrateCmd::Expire => cmd_orchestrate_expire(&pool).await?,
+                OrchestrateCmd::Expire => cmd_orchestrate_expire(&pool, &project_dir).await?,
                 OrchestrateCmd::Lock {
                     task,
                     spec,
                     module,
                     semantic,
                     file,
-                } => cmd_orchestrate_lock(&pool, &task, &spec, &module, &semantic, &file).await?,
+                } => {
+                    cmd_orchestrate_lock(
+                        &pool,
+                        &project_dir,
+                        &task,
+                        &spec,
+                        &module,
+                        &semantic,
+                        &file,
+                    )
+                    .await?
+                }
                 OrchestrateCmd::Locks { spec, task } => {
-                    cmd_orchestrate_locks(&pool, spec.as_deref(), task.as_deref()).await?
+                    cmd_orchestrate_locks(&pool, &project_dir, spec.as_deref(), task.as_deref())
+                        .await?
                 }
                 OrchestrateCmd::TaskMetadata {
                     task,
@@ -998,6 +1067,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_orchestrate_task_metadata(
                         &pool,
+                        &project_dir,
                         &task,
                         &depends_on,
                         &conflicts_with,
@@ -1022,6 +1092,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_orchestrate_replan(
                         &pool,
+                        &project_dir,
                         &id,
                         &spec,
                         task.as_deref(),
@@ -1033,10 +1104,16 @@ async fn main() -> Result<()> {
                     .await?
                 }
                 OrchestrateCmd::Replans { spec, status } => {
-                    cmd_orchestrate_replans(&pool, spec.as_deref(), status.as_deref()).await?
+                    cmd_orchestrate_replans(
+                        &pool,
+                        &project_dir,
+                        spec.as_deref(),
+                        status.as_deref(),
+                    )
+                    .await?
                 }
                 OrchestrateCmd::ReplanUpdate { id, status } => {
-                    cmd_orchestrate_replan_update(&pool, &id, &status).await?
+                    cmd_orchestrate_replan_update(&pool, &project_dir, &id, &status).await?
                 }
                 OrchestrateCmd::PlanVersion {
                     id,
@@ -1048,6 +1125,7 @@ async fn main() -> Result<()> {
                 } => {
                     cmd_orchestrate_plan_version(
                         &pool,
+                        &project_dir,
                         &id,
                         &spec,
                         version,
@@ -1058,19 +1136,23 @@ async fn main() -> Result<()> {
                     .await?
                 }
                 OrchestrateCmd::PlanVersions { spec } => {
-                    cmd_orchestrate_plan_versions(&pool, spec.as_deref()).await?
+                    cmd_orchestrate_plan_versions(&pool, &project_dir, spec.as_deref()).await?
                 }
             }
         }
 
         Commands::Pulse { since, until } => {
             let pool = open_project_db().await?;
-            cmd_pulse(&pool, since.as_deref(), until.as_deref()).await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
+            cmd_pulse(&pool, &project_dir, since.as_deref(), until.as_deref()).await?;
         }
 
         Commands::Trace { spec, agent, limit } => {
             let pool = open_project_db().await?;
-            cmd_trace(&pool, spec.as_deref(), agent.as_deref(), limit).await?;
+            let project_dir = resolve_project_dir()?;
+            let project_dir = project_dir.to_string_lossy();
+            cmd_trace(&pool, &project_dir, spec.as_deref(), agent.as_deref(), limit).await?;
         }
 
         Commands::Mcp { cmd } => match cmd {
@@ -1078,8 +1160,8 @@ async fn main() -> Result<()> {
                 use cli::mcp_cmd::resolve_project_dir;
                 let project_dir = resolve_project_dir()?;
                 std::env::set_current_dir(&project_dir)?;
-                let pool = open_project_db().await?;
-                cmd_mcp_serve(pool).await?;
+                let _pool = open_project_db().await?;
+                cmd_mcp_serve().await?;
             }
             McpCmd::Setup { tool, local } => {
                 cmd_mcp_setup(&parse_tool_target(&tool), local)?;

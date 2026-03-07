@@ -15,6 +15,7 @@ use super::util::colorize_status;
 #[allow(clippy::too_many_arguments)]
 pub async fn cmd_task_add(
     pool: &SqlitePool,
+    project_dir: &str,
     spec_id: &str,
     task_id: &str,
     title: &str,
@@ -43,6 +44,7 @@ pub async fn cmd_task_add(
         .collect();
     let task = create_task(
         pool,
+        project_dir,
         task_id,
         spec_id,
         title,
@@ -81,10 +83,11 @@ pub async fn cmd_task_add(
     Ok(())
 }
 
-pub async fn cmd_task_start(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = update_task_status(pool, id, "claimed").await?;
+pub async fn cmd_task_start(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let task = update_task_status(pool, project_dir, id, "claimed").await?;
     emit_event(
         pool,
+        project_dir,
         "TaskStarted",
         Some(&task.spec),
         Some(&task.agent),
@@ -95,11 +98,12 @@ pub async fn cmd_task_start(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_task_done(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = update_task_status(pool, id, "done").await?;
-    let _ = release_task_locks(pool, id).await?;
+pub async fn cmd_task_done(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let task = update_task_status(pool, project_dir, id, "done").await?;
+    let _ = release_task_locks(pool, project_dir, id).await?;
     emit_event(
         pool,
+        project_dir,
         "TaskCompleted",
         Some(&task.spec),
         Some(&task.agent),
@@ -115,11 +119,12 @@ pub async fn cmd_task_done(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_task_block(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = update_task_status(pool, id, "blocked").await?;
-    let _ = release_task_locks(pool, id).await?;
+pub async fn cmd_task_block(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let task = update_task_status(pool, project_dir, id, "blocked").await?;
+    let _ = release_task_locks(pool, project_dir, id).await?;
     emit_event(
         pool,
+        project_dir,
         "TaskBlocked",
         Some(&task.spec),
         Some(&task.agent),
@@ -135,10 +140,11 @@ pub async fn cmd_task_block(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_task_review(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = update_task_status(pool, id, "awaiting_review").await?;
+pub async fn cmd_task_review(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let task = update_task_status(pool, project_dir, id, "awaiting_review").await?;
     emit_event(
         pool,
+        project_dir,
         "TaskInReview",
         Some(&task.spec),
         Some(&task.agent),
@@ -154,10 +160,11 @@ pub async fn cmd_task_review(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_task_verify(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = update_task_status(pool, id, "verifying").await?;
+pub async fn cmd_task_verify(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let task = update_task_status(pool, project_dir, id, "verifying").await?;
     emit_event(
         pool,
+        project_dir,
         "TaskVerifying",
         Some(&task.spec),
         Some(&task.agent),
@@ -173,11 +180,12 @@ pub async fn cmd_task_verify(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_task_cancel(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = update_task_status(pool, id, "cancelled").await?;
-    let _ = release_task_locks(pool, id).await?;
+pub async fn cmd_task_cancel(pool: &SqlitePool, project_dir: &str, id: &str) -> Result<()> {
+    let task = update_task_status(pool, project_dir, id, "cancelled").await?;
+    let _ = release_task_locks(pool, project_dir, id).await?;
     emit_event(
         pool,
+        project_dir,
         "TaskCancelled",
         Some(&task.spec),
         Some(&task.agent),
@@ -193,8 +201,13 @@ pub async fn cmd_task_cancel(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_task_list(pool: &SqlitePool, spec_id: Option<&str>, json: bool) -> Result<()> {
-    let tasks = list_tasks(pool, spec_id).await?;
+pub async fn cmd_task_list(
+    pool: &SqlitePool,
+    project_dir: &str,
+    spec_id: Option<&str>,
+    json: bool,
+) -> Result<()> {
+    let tasks = list_tasks(pool, project_dir, spec_id).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&tasks)?);

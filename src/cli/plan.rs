@@ -13,8 +13,8 @@ use crate::sdd::{
 
 use super::util::colorize_status;
 
-pub async fn cmd_plan_build(pool: &SqlitePool, spec_id: &str) -> Result<()> {
-    let spec = get_spec(pool, spec_id)
+pub async fn cmd_plan_build(pool: &SqlitePool, project_dir: &str, spec_id: &str) -> Result<()> {
+    let spec = get_spec(pool, project_dir, spec_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Spec '{}' not found", spec_id))?;
 
@@ -71,6 +71,7 @@ pub async fn cmd_plan_build(pool: &SqlitePool, spec_id: &str) -> Result<()> {
 
         create_task(
             pool,
+            project_dir,
             task_id.trim(),
             spec_id,
             title.trim(),
@@ -95,15 +96,15 @@ pub async fn cmd_plan_build(pool: &SqlitePool, spec_id: &str) -> Result<()> {
     }
 
     if task_count > 0 {
-        let tasks = list_tasks(pool, Some(spec_id)).await?;
-        let existing_versions = list_plan_versions(pool, Some(spec_id)).await?;
+        let tasks = list_tasks(pool, project_dir, Some(spec_id)).await?;
+        let existing_versions = list_plan_versions(pool, project_dir, Some(spec_id)).await?;
         let next_version = existing_versions
             .iter()
             .map(|p| p.version)
             .max()
             .unwrap_or(0)
             + 1;
-        supersede_plan_versions(pool, spec_id).await?;
+        supersede_plan_versions(pool, project_dir, spec_id).await?;
         let plan_id = format!("PLAN-{}-v{}", spec_id, next_version);
         let plan_json = serde_json::json!({
             "spec": spec_id,
@@ -113,6 +114,7 @@ pub async fn cmd_plan_build(pool: &SqlitePool, spec_id: &str) -> Result<()> {
         });
         create_plan_version(
             pool,
+            project_dir,
             &plan_id,
             spec_id,
             next_version,
@@ -122,6 +124,7 @@ pub async fn cmd_plan_build(pool: &SqlitePool, spec_id: &str) -> Result<()> {
         .await?;
         emit_event(
             pool,
+            project_dir,
             "PlanBuilt",
             Some(spec_id),
             Some("human"),
@@ -140,8 +143,8 @@ pub async fn cmd_plan_build(pool: &SqlitePool, spec_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_plan_show(pool: &SqlitePool, spec_id: &str) -> Result<()> {
-    let spec = get_spec(pool, spec_id)
+pub async fn cmd_plan_show(pool: &SqlitePool, project_dir: &str, spec_id: &str) -> Result<()> {
+    let spec = get_spec(pool, project_dir, spec_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Spec '{}' not found", spec_id))?;
 
@@ -151,7 +154,7 @@ pub async fn cmd_plan_show(pool: &SqlitePool, spec_id: &str) -> Result<()> {
     );
     println!("  {} — {}", spec.id.cyan(), spec.title.bold());
     println!("  Status: {}", colorize_status(&spec.status));
-    let ops = summarize_spec_operations(pool, spec_id).await?;
+    let ops = summarize_spec_operations(pool, project_dir, spec_id).await?;
     println!(
         "  Ops: {} blocking incidents | {} blocking gaps | {} active interrupts | {} failing verifications",
         ops.summary.blocking_incidents,
@@ -181,7 +184,7 @@ pub async fn cmd_plan_show(pool: &SqlitePool, spec_id: &str) -> Result<()> {
     }
     println!();
 
-    let tasks = list_tasks(pool, Some(spec_id)).await?;
+    let tasks = list_tasks(pool, project_dir, Some(spec_id)).await?;
 
     if tasks.is_empty() {
         println!(
@@ -255,11 +258,11 @@ pub async fn cmd_plan_show(pool: &SqlitePool, spec_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_plan_dag(pool: &SqlitePool, spec_id: &str) -> Result<()> {
-    let spec = get_spec(pool, spec_id)
+pub async fn cmd_plan_dag(pool: &SqlitePool, project_dir: &str, spec_id: &str) -> Result<()> {
+    let spec = get_spec(pool, project_dir, spec_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Spec '{}' not found", spec_id))?;
-    let tasks = list_tasks(pool, Some(spec_id)).await?;
+    let tasks = list_tasks(pool, project_dir, Some(spec_id)).await?;
     if tasks.is_empty() {
         println!("{}", "No tasks to visualize.".dimmed());
         return Ok(());

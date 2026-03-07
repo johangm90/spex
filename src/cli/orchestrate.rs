@@ -14,8 +14,13 @@ use crate::sdd::{
     task_lock::{acquire_task_locks, query_task_locks, release_task_locks},
 };
 
-pub async fn cmd_orchestrate_next(pool: &SqlitePool, spec: &str, agent: &str) -> Result<()> {
-    let decision = scheduler_next(pool, spec, agent).await?;
+pub async fn cmd_orchestrate_next(
+    pool: &SqlitePool,
+    project_dir: &str,
+    spec: &str,
+    agent: &str,
+) -> Result<()> {
+    let decision = scheduler_next(pool, project_dir, spec, agent).await?;
     if let Some(task) = decision.task {
         println!(
             "{} next task for {}: {} {}",
@@ -42,17 +47,26 @@ pub async fn cmd_orchestrate_next(pool: &SqlitePool, spec: &str, agent: &str) ->
 
 pub async fn cmd_orchestrate_claim(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     task: &str,
     agent: &str,
     auto_lock: bool,
     ttl: i64,
 ) -> Result<()> {
-    let lease = claim_task_lease(pool, task, agent, ttl).await?;
+    let lease = claim_task_lease(pool, project_dir, task, agent, ttl).await?;
     let payload = serde_json::json!({"task": task, "agent": agent, "lease_expires_at": lease.lease_expires_at});
-    emit_event(pool, "TaskClaimed", spec, Some(agent), &payload.to_string()).await?;
+    emit_event(
+        pool,
+        project_dir,
+        "TaskClaimed",
+        spec,
+        Some(agent),
+        &payload.to_string(),
+    )
+    .await?;
     if auto_lock {
-        let task_record = get_task(pool, task)
+        let task_record = get_task(pool, project_dir, task)
             .await?
             .ok_or_else(|| anyhow!("Task '{}' not found", task))?;
         let meta = task_runtime_metadata(&task_record);
@@ -62,13 +76,15 @@ pub async fn cmd_orchestrate_claim(
             .map(|l| (l.lock_type.clone(), l.resource.clone()))
             .collect();
         if !locks.is_empty() {
-            let acquired = acquire_task_locks(pool, task, &task_record.spec, &locks).await?;
+            let acquired =
+                acquire_task_locks(pool, project_dir, task, &task_record.spec, &locks).await?;
             let payload = serde_json::json!({
                 "task": task,
                 "locks": acquired.iter().map(|l| serde_json::json!({"lock_type": l.lock_type, "resource": l.resource})).collect::<Vec<_>>()
             });
             emit_event(
                 pool,
+                project_dir,
                 "TaskLocksAcquired",
                 spec.or(Some(&task_record.spec)),
                 Some(agent),
@@ -90,15 +106,17 @@ pub async fn cmd_orchestrate_claim(
 
 pub async fn cmd_orchestrate_heartbeat(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     task: &str,
     ttl: i64,
     progress: Option<&str>,
 ) -> Result<()> {
-    let lease = heartbeat_task_lease(pool, task, ttl, Some("running")).await?;
+    let lease = heartbeat_task_lease(pool, project_dir, task, ttl, Some("running")).await?;
     let payload = serde_json::json!({"task": task, "agent": lease.agent_id, "status": "running", "progress": progress.unwrap_or("heartbeat"), "lease_expires_at": lease.lease_expires_at});
     emit_event(
         pool,
+        project_dir,
         "TaskHeartbeat",
         spec,
         Some(&lease.agent_id),
@@ -116,16 +134,18 @@ pub async fn cmd_orchestrate_heartbeat(
 
 pub async fn cmd_orchestrate_release(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     task: &str,
     final_status: Option<&str>,
 ) -> Result<()> {
-    let lease = release_task_lease(pool, task, final_status).await?;
-    let _ = release_task_locks(pool, task).await?;
+    let lease = release_task_lease(pool, project_dir, task, final_status).await?;
+    let _ = release_task_locks(pool, project_dir, task).await?;
     let payload =
         serde_json::json!({"task": task, "final_status": final_status.unwrap_or("released")});
     emit_event(
         pool,
+        project_dir,
         "TaskLeaseReleased",
         spec,
         Some(&lease.agent_id),
@@ -141,8 +161,8 @@ pub async fn cmd_orchestrate_release(
     Ok(())
 }
 
-pub async fn cmd_orchestrate_expire(pool: &SqlitePool) -> Result<()> {
-    let expired = expire_stale_task_leases(pool).await?;
+pub async fn cmd_orchestrate_expire(pool: &SqlitePool, project_dir: &str) -> Result<()> {
+    let expired = expire_stale_task_leases(pool, project_dir).await?;
     if expired.is_empty() {
         println!("{} no stale leases", "✓".green());
     } else {
@@ -156,6 +176,7 @@ pub async fn cmd_orchestrate_expire(pool: &SqlitePool) -> Result<()> {
 
 pub async fn cmd_orchestrate_lock(
     pool: &SqlitePool,
+    project_dir: &str,
     task: &str,
     spec: &str,
     modules: &[String],
@@ -174,13 +195,14 @@ pub async fn cmd_orchestrate_lock(
     if locks.is_empty() {
         return Err(anyhow!("No locks requested"));
     }
-    let created = acquire_task_locks(pool, task, spec, &locks).await?;
+    let created = acquire_task_locks(pool, project_dir, task, spec, &locks).await?;
     let payload = serde_json::json!({
         "task": task,
         "locks": created.iter().map(|l| serde_json::json!({"lock_type": l.lock_type, "resource": l.resource})).collect::<Vec<_>>()
     });
     emit_event(
         pool,
+        project_dir,
         "TaskLocksAcquired",
         Some(spec),
         None,
@@ -198,10 +220,11 @@ pub async fn cmd_orchestrate_lock(
 
 pub async fn cmd_orchestrate_locks(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     task: Option<&str>,
 ) -> Result<()> {
-    let locks = query_task_locks(pool, spec, task, true).await?;
+    let locks = query_task_locks(pool, project_dir, spec, task, true).await?;
     if locks.is_empty() {
         println!("{}", "No active locks.".dimmed());
         return Ok(());
@@ -221,6 +244,7 @@ pub async fn cmd_orchestrate_locks(
 #[allow(clippy::too_many_arguments)]
 pub async fn cmd_orchestrate_task_metadata(
     pool: &SqlitePool,
+    project_dir: &str,
     task: &str,
     depends_on: &[String],
     conflicts_with: &[String],
@@ -244,6 +268,7 @@ pub async fn cmd_orchestrate_task_metadata(
         .collect();
     let updated = update_task_metadata(
         pool,
+        project_dir,
         task,
         Some(depends_on),
         Some(conflicts_with),
@@ -268,6 +293,7 @@ pub async fn cmd_orchestrate_task_metadata(
 #[allow(clippy::too_many_arguments)]
 pub async fn cmd_orchestrate_replan(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec: &str,
     task: Option<&str>,
@@ -276,11 +302,22 @@ pub async fn cmd_orchestrate_replan(
     impact: &[String],
     proposed_action: Option<&str>,
 ) -> Result<()> {
-    let req =
-        create_replan_request(pool, id, spec, task, agent, reason, impact, proposed_action).await?;
+    let req = create_replan_request(
+        pool,
+        project_dir,
+        id,
+        spec,
+        task,
+        agent,
+        reason,
+        impact,
+        proposed_action,
+    )
+    .await?;
     let payload = serde_json::json!({"task": task, "reason": reason, "impact": impact, "proposed_action": proposed_action});
     emit_event(
         pool,
+        project_dir,
         "ReplanRequested",
         Some(spec),
         Some(agent),
@@ -298,10 +335,11 @@ pub async fn cmd_orchestrate_replan(
 
 pub async fn cmd_orchestrate_replans(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     status: Option<&str>,
 ) -> Result<()> {
-    let items = list_replan_requests(pool, spec, status).await?;
+    let items = list_replan_requests(pool, project_dir, spec, status).await?;
     if items.is_empty() {
         println!("{}", "No replan requests.".dimmed());
         return Ok(());
@@ -319,10 +357,11 @@ pub async fn cmd_orchestrate_replans(
 
 pub async fn cmd_orchestrate_replan_update(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     status: &str,
 ) -> Result<()> {
-    let item = update_replan_request(pool, id, status).await?;
+    let item = update_replan_request(pool, project_dir, id, status).await?;
     println!(
         "{} replan {} -> {}",
         "✓".green(),
@@ -332,8 +371,10 @@ pub async fn cmd_orchestrate_replan_update(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_orchestrate_plan_version(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec: &str,
     version: i64,
@@ -342,9 +383,9 @@ pub async fn cmd_orchestrate_plan_version(
     supersede: bool,
 ) -> Result<()> {
     if supersede {
-        supersede_plan_versions(pool, spec).await?;
+        supersede_plan_versions(pool, project_dir, spec).await?;
     }
-    let plan = create_plan_version(pool, id, spec, version, reason, plan_json).await?;
+    let plan = create_plan_version(pool, project_dir, id, spec, version, reason, plan_json).await?;
     println!(
         "{} plan {} v{} active for {}",
         "✓".green(),
@@ -355,8 +396,12 @@ pub async fn cmd_orchestrate_plan_version(
     Ok(())
 }
 
-pub async fn cmd_orchestrate_plan_versions(pool: &SqlitePool, spec: Option<&str>) -> Result<()> {
-    let plans = list_plan_versions(pool, spec).await?;
+pub async fn cmd_orchestrate_plan_versions(
+    pool: &SqlitePool,
+    project_dir: &str,
+    spec: Option<&str>,
+) -> Result<()> {
+    let plans = list_plan_versions(pool, project_dir, spec).await?;
     if plans.is_empty() {
         println!("{}", "No plan versions.".dimmed());
         return Ok(());

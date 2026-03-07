@@ -1995,6 +1995,7 @@ fn build_tools_list() -> Value {
     ])
 }
 
+#[allow(dead_code)]
 fn detect_project_dir() -> String {
     std::env::current_dir()
         .ok()
