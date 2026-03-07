@@ -17,6 +17,7 @@ pub struct Interrupt {
 
 pub async fn create_interrupt(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec_id: &str,
     reason_type: &str,
@@ -26,9 +27,11 @@ pub async fn create_interrupt(
     let now = Utc::now().to_rfc3339();
     let tasks_json = serde_json::to_string(preempted_tasks)?;
     sqlx::query(
-        "INSERT INTO interrupts (id, spec_id, reason_type, status, preempted_tasks, resume_hint, created_at, updated_at)          VALUES (?, ?, ?, 'open', ?, ?, ?, ?)"
+        "INSERT INTO interrupts (id, project_dir, spec_id, reason_type, status, preempted_tasks, resume_hint, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, 'open', ?, ?, ?, ?)"
     )
     .bind(id)
+    .bind(project_dir)
     .bind(spec_id)
     .bind(reason_type)
     .bind(&tasks_json)
@@ -38,15 +41,20 @@ pub async fn create_interrupt(
     .execute(pool)
     .await?;
 
-    get_interrupt(pool, id)
+    get_interrupt(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Failed to create interrupt '{}'", id))
 }
 
-pub async fn get_interrupt(pool: &SqlitePool, id: &str) -> Result<Option<Interrupt>> {
+pub async fn get_interrupt(
+    pool: &SqlitePool,
+    project_dir: &str,
+    id: &str,
+) -> Result<Option<Interrupt>> {
     let row = sqlx::query_as::<_, (String, String, String, String, String, Option<String>, String, String)>(
-        "SELECT id, spec_id, reason_type, status, preempted_tasks, resume_hint, created_at, updated_at FROM interrupts WHERE id = ?"
+        "SELECT id, spec_id, reason_type, status, preempted_tasks, resume_hint, created_at, updated_at FROM interrupts WHERE project_dir = ? AND id = ?"
     )
+    .bind(project_dir)
     .bind(id)
     .fetch_optional(pool)
     .await?;
@@ -76,11 +84,12 @@ pub async fn get_interrupt(pool: &SqlitePool, id: &str) -> Result<Option<Interru
 
 pub async fn list_interrupts(
     pool: &SqlitePool,
+    project_dir: &str,
     spec_filter: Option<&str>,
     status_filter: Option<&str>,
 ) -> Result<Vec<Interrupt>> {
     let mut query = String::from(
-        "SELECT id, spec_id, reason_type, status, preempted_tasks, resume_hint, created_at, updated_at FROM interrupts WHERE 1=1"
+        "SELECT id, spec_id, reason_type, status, preempted_tasks, resume_hint, created_at, updated_at FROM interrupts WHERE project_dir = ?"
     );
     if spec_filter.is_some() {
         query.push_str(" AND spec_id = ?");
@@ -103,6 +112,7 @@ pub async fn list_interrupts(
             String,
         ),
     >(&query);
+    q = q.bind(project_dir);
     if let Some(spec) = spec_filter {
         q = q.bind(spec);
     }
@@ -139,26 +149,30 @@ pub async fn list_interrupts(
 
 pub async fn update_interrupt(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     status: Option<&str>,
     resume_hint: Option<&str>,
 ) -> Result<Interrupt> {
-    let current = get_interrupt(pool, id)
+    let current = get_interrupt(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Interrupt '{}' not found", id))?;
     let now = Utc::now().to_rfc3339();
     let status = status.unwrap_or(&current.status);
     let resume_hint = resume_hint.map(str::to_string).or(current.resume_hint);
 
-    sqlx::query("UPDATE interrupts SET status = ?, resume_hint = ?, updated_at = ? WHERE id = ?")
-        .bind(status)
-        .bind(resume_hint)
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE interrupts SET status = ?, resume_hint = ?, updated_at = ? WHERE project_dir = ? AND id = ?",
+    )
+    .bind(status)
+    .bind(resume_hint)
+    .bind(&now)
+    .bind(project_dir)
+    .bind(id)
+    .execute(pool)
+    .await?;
 
-    get_interrupt(pool, id)
+    get_interrupt(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Interrupt '{}' not found after update", id))
 }

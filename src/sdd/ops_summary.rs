@@ -28,13 +28,15 @@ pub struct SpecOperationalState {
 
 pub async fn summarize_spec_operations(
     pool: &SqlitePool,
+    project_dir: &str,
     spec_id: &str,
 ) -> Result<SpecOperationalState> {
-    let incidents = list_incidents(pool, Some(spec_id), None).await?;
-    let context_gaps = list_context_gaps(pool, Some(spec_id), None).await?;
-    let interrupts = list_interrupts(pool, Some(spec_id), None).await?;
-    let verification_runs = list_verification_runs(pool, Some(spec_id), None, None).await?;
-    let tasks = list_tasks(pool, Some(spec_id)).await?;
+    let incidents = list_incidents(pool, project_dir, Some(spec_id), None).await?;
+    let context_gaps = list_context_gaps(pool, project_dir, Some(spec_id), None).await?;
+    let interrupts = list_interrupts(pool, project_dir, Some(spec_id), None).await?;
+    let verification_runs =
+        list_verification_runs(pool, project_dir, Some(spec_id), None, None).await?;
+    let tasks = list_tasks(pool, project_dir, Some(spec_id)).await?;
 
     let open_incidents: Vec<_> = incidents
         .into_iter()

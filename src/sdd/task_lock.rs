@@ -17,11 +17,14 @@ pub struct TaskLock {
 
 pub async fn query_task_locks(
     pool: &SqlitePool,
+    project_dir: &str,
     spec: Option<&str>,
     task: Option<&str>,
     active_only: bool,
 ) -> Result<Vec<TaskLock>> {
-    let mut query = String::from("SELECT id, task_id, spec_id, lock_type, resource, status, acquired_at, released_at FROM task_locks WHERE 1=1");
+    let mut query = String::from(
+        "SELECT id, task_id, spec_id, lock_type, resource, status, acquired_at, released_at FROM task_locks WHERE project_dir = ?",
+    );
     if spec.is_some() {
         query.push_str(" AND spec_id = ?");
     }
@@ -45,6 +48,7 @@ pub async fn query_task_locks(
             Option<String>,
         ),
     >(&query);
+    q = q.bind(project_dir);
     if let Some(spec) = spec {
         q = q.bind(spec);
     }
@@ -73,6 +77,7 @@ pub async fn query_task_locks(
 
 pub async fn acquire_task_locks(
     pool: &SqlitePool,
+    project_dir: &str,
     task_id: &str,
     spec_id: &str,
     locks: &[(String, String)],
@@ -81,8 +86,9 @@ pub async fn acquire_task_locks(
     let mut created = Vec::new();
     for (lock_type, resource) in locks {
         let conflict = sqlx::query_as::<_, (String, String, String)>(
-            "SELECT id, task_id, resource FROM task_locks WHERE spec_id = ? AND lock_type = ? AND resource = ? AND status = 'active' AND task_id != ? LIMIT 1"
+            "SELECT id, task_id, resource FROM task_locks WHERE project_dir = ? AND spec_id = ? AND lock_type = ? AND resource = ? AND status = 'active' AND task_id != ? LIMIT 1",
         )
+        .bind(project_dir)
         .bind(spec_id)
         .bind(lock_type)
         .bind(resource)
@@ -97,15 +103,18 @@ pub async fn acquire_task_locks(
             ));
         }
         let id = format!("LOCK-{}-{}-{}", task_id, lock_type, created.len() + 1);
-        sqlx::query("INSERT INTO task_locks (id, task_id, spec_id, lock_type, resource, status, acquired_at) VALUES (?, ?, ?, ?, ?, 'active', ?)")
-            .bind(&id)
-            .bind(task_id)
-            .bind(spec_id)
-            .bind(lock_type)
-            .bind(resource)
-            .bind(&now)
-            .execute(pool)
-            .await?;
+        sqlx::query(
+            "INSERT INTO task_locks (id, project_dir, task_id, spec_id, lock_type, resource, status, acquired_at) VALUES (?, ?, ?, ?, ?, ?, 'active', ?)",
+        )
+        .bind(&id)
+        .bind(project_dir)
+        .bind(task_id)
+        .bind(spec_id)
+        .bind(lock_type)
+        .bind(resource)
+        .bind(&now)
+        .execute(pool)
+        .await?;
         created.push(TaskLock {
             id,
             task_id: task_id.to_string(),
@@ -120,12 +129,19 @@ pub async fn acquire_task_locks(
     Ok(created)
 }
 
-pub async fn release_task_locks(pool: &SqlitePool, task_id: &str) -> Result<Vec<TaskLock>> {
+pub async fn release_task_locks(
+    pool: &SqlitePool,
+    project_dir: &str,
+    task_id: &str,
+) -> Result<Vec<TaskLock>> {
     let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE task_locks SET status = 'released', released_at = ? WHERE task_id = ? AND status = 'active'")
-        .bind(&now)
-        .bind(task_id)
-        .execute(pool)
-        .await?;
-    query_task_locks(pool, None, Some(task_id), false).await
+    sqlx::query(
+        "UPDATE task_locks SET status = 'released', released_at = ? WHERE project_dir = ? AND task_id = ? AND status = 'active'",
+    )
+    .bind(&now)
+    .bind(project_dir)
+    .bind(task_id)
+    .execute(pool)
+    .await?;
+    query_task_locks(pool, project_dir, None, Some(task_id), false).await
 }

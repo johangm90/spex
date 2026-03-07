@@ -17,10 +17,15 @@ pub struct TaskLease {
     pub updated_at: String,
 }
 
-pub async fn get_task_lease(pool: &SqlitePool, task_id: &str) -> Result<Option<TaskLease>> {
+pub async fn get_task_lease(
+    pool: &SqlitePool,
+    project_dir: &str,
+    task_id: &str,
+) -> Result<Option<TaskLease>> {
     let row = sqlx::query_as::<_, (String, String, String, String, String, i64, String, String)>(
-        "SELECT task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at FROM task_leases WHERE task_id = ?"
+        "SELECT task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at FROM task_leases WHERE project_dir = ? AND task_id = ?",
     )
+    .bind(project_dir)
     .bind(task_id)
     .fetch_optional(pool)
     .await?;
@@ -49,19 +54,22 @@ pub async fn get_task_lease(pool: &SqlitePool, task_id: &str) -> Result<Option<T
 
 pub async fn list_task_leases(
     pool: &SqlitePool,
+    project_dir: &str,
     status_filter: Option<&str>,
 ) -> Result<Vec<TaskLease>> {
     let rows = if let Some(status) = status_filter {
         sqlx::query_as::<_, (String, String, String, String, String, i64, String, String)>(
-            "SELECT task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at FROM task_leases WHERE status = ? ORDER BY updated_at DESC"
+            "SELECT task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at FROM task_leases WHERE project_dir = ? AND status = ? ORDER BY updated_at DESC",
         )
+        .bind(project_dir)
         .bind(status)
         .fetch_all(pool)
         .await?
     } else {
         sqlx::query_as::<_, (String, String, String, String, String, i64, String, String)>(
-            "SELECT task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at FROM task_leases ORDER BY updated_at DESC"
+            "SELECT task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at FROM task_leases WHERE project_dir = ? ORDER BY updated_at DESC",
         )
+        .bind(project_dir)
         .fetch_all(pool)
         .await?
     };
@@ -93,11 +101,12 @@ pub async fn list_task_leases(
 
 pub async fn claim_task_lease(
     pool: &SqlitePool,
+    project_dir: &str,
     task_id: &str,
     agent_id: &str,
     ttl_seconds: i64,
 ) -> Result<TaskLease> {
-    let task = get_task(pool, task_id)
+    let task = get_task(pool, project_dir, task_id)
         .await?
         .ok_or_else(|| anyhow!("Task '{}' not found", task_id))?;
     if task.status != "ready" {
@@ -111,24 +120,26 @@ pub async fn claim_task_lease(
     let lease_expires_at = (now + Duration::seconds(ttl_seconds)).to_rfc3339();
     let now_str = now.to_rfc3339();
 
-    if let Some(existing) = get_task_lease(pool, task_id).await? {
+    if let Some(existing) = get_task_lease(pool, project_dir, task_id).await? {
         if existing.status == "claimed" || existing.status == "running" {
             return Err(anyhow!("Task '{}' already has an active lease", task_id));
         }
         sqlx::query(
-            "UPDATE task_leases SET agent_id = ?, status = 'claimed', lease_expires_at = ?, heartbeat_at = ?, attempt_count = attempt_count + 1, updated_at = ? WHERE task_id = ?"
+            "UPDATE task_leases SET agent_id = ?, status = 'claimed', lease_expires_at = ?, heartbeat_at = ?, attempt_count = attempt_count + 1, updated_at = ? WHERE project_dir = ? AND task_id = ?",
         )
         .bind(agent_id)
         .bind(&lease_expires_at)
         .bind(&now_str)
         .bind(&now_str)
+        .bind(project_dir)
         .bind(task_id)
         .execute(pool)
         .await?;
     } else {
         sqlx::query(
-            "INSERT INTO task_leases (task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at) VALUES (?, ?, 'claimed', ?, ?, 1, ?, ?)"
+            "INSERT INTO task_leases (project_dir, task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at) VALUES (?, ?, ?, 'claimed', ?, ?, 1, ?, ?)",
         )
+        .bind(project_dir)
         .bind(task_id)
         .bind(agent_id)
         .bind(&lease_expires_at)
@@ -139,19 +150,20 @@ pub async fn claim_task_lease(
         .await?;
     }
 
-    update_task_status(pool, task_id, "claimed").await?;
-    get_task_lease(pool, task_id)
+    update_task_status(pool, project_dir, task_id, "claimed").await?;
+    get_task_lease(pool, project_dir, task_id)
         .await?
         .ok_or_else(|| anyhow!("Task lease '{}' not found", task_id))
 }
 
 pub async fn heartbeat_task_lease(
     pool: &SqlitePool,
+    project_dir: &str,
     task_id: &str,
     ttl_seconds: i64,
     progress_status: Option<&str>,
 ) -> Result<TaskLease> {
-    let lease = get_task_lease(pool, task_id)
+    let lease = get_task_lease(pool, project_dir, task_id)
         .await?
         .ok_or_else(|| anyhow!("Task lease '{}' not found", task_id))?;
     if lease.status != "claimed" && lease.status != "running" {
@@ -161,53 +173,64 @@ pub async fn heartbeat_task_lease(
     let lease_expires_at = (now + Duration::seconds(ttl_seconds)).to_rfc3339();
     let now_str = now.to_rfc3339();
     let next_status = progress_status.unwrap_or("running");
-    sqlx::query("UPDATE task_leases SET status = 'running', lease_expires_at = ?, heartbeat_at = ?, updated_at = ? WHERE task_id = ?")
-        .bind(&lease_expires_at)
-        .bind(&now_str)
-        .bind(&now_str)
-        .bind(task_id)
-        .execute(pool)
-        .await?;
-    let task = get_task(pool, task_id)
+    sqlx::query(
+        "UPDATE task_leases SET status = 'running', lease_expires_at = ?, heartbeat_at = ?, updated_at = ? WHERE project_dir = ? AND task_id = ?",
+    )
+    .bind(&lease_expires_at)
+    .bind(&now_str)
+    .bind(&now_str)
+    .bind(project_dir)
+    .bind(task_id)
+    .execute(pool)
+    .await?;
+    let task = get_task(pool, project_dir, task_id)
         .await?
         .ok_or_else(|| anyhow!("Task '{}' not found", task_id))?;
     if task.status == "claimed" && next_status == "running" {
-        update_task_status(pool, task_id, "running").await?;
+        update_task_status(pool, project_dir, task_id, "running").await?;
     }
-    get_task_lease(pool, task_id)
+    get_task_lease(pool, project_dir, task_id)
         .await?
         .ok_or_else(|| anyhow!("Task lease '{}' not found", task_id))
 }
 
 pub async fn release_task_lease(
     pool: &SqlitePool,
+    project_dir: &str,
     task_id: &str,
     final_status: Option<&str>,
 ) -> Result<TaskLease> {
     let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE task_leases SET status = 'released', updated_at = ? WHERE task_id = ?")
-        .bind(&now)
-        .bind(task_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE task_leases SET status = 'released', updated_at = ? WHERE project_dir = ? AND task_id = ?",
+    )
+    .bind(&now)
+    .bind(project_dir)
+    .bind(task_id)
+    .execute(pool)
+    .await?;
     if let Some(status) = final_status {
-        let task = get_task(pool, task_id)
+        let task = get_task(pool, project_dir, task_id)
             .await?
             .ok_or_else(|| anyhow!("Task '{}' not found", task_id))?;
         if task.status != status {
-            update_task_status(pool, task_id, status).await?;
+            update_task_status(pool, project_dir, task_id, status).await?;
         }
     }
-    get_task_lease(pool, task_id)
+    get_task_lease(pool, project_dir, task_id)
         .await?
         .ok_or_else(|| anyhow!("Task lease '{}' not found", task_id))
 }
 
-pub async fn expire_stale_task_leases(pool: &SqlitePool) -> Result<Vec<TaskLease>> {
+pub async fn expire_stale_task_leases(
+    pool: &SqlitePool,
+    project_dir: &str,
+) -> Result<Vec<TaskLease>> {
     let now = Utc::now().to_rfc3339();
     let stale = sqlx::query_as::<_, (String, String, String, String, String, i64, String, String)>(
-        "SELECT task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at FROM task_leases WHERE (status = 'claimed' OR status = 'running') AND lease_expires_at < ?"
+        "SELECT task_id, agent_id, status, lease_expires_at, heartbeat_at, attempt_count, created_at, updated_at FROM task_leases WHERE project_dir = ? AND (status = 'claimed' OR status = 'running') AND lease_expires_at < ?",
     )
+    .bind(project_dir)
     .bind(&now)
     .fetch_all(pool)
     .await?;
@@ -224,20 +247,26 @@ pub async fn expire_stale_task_leases(pool: &SqlitePool) -> Result<Vec<TaskLease
         _updated_at,
     ) in stale
     {
-        sqlx::query("UPDATE task_leases SET status = 'expired', updated_at = ? WHERE task_id = ?")
-            .bind(&now)
-            .bind(&task_id)
-            .execute(pool)
-            .await?;
-        let task = get_task(pool, &task_id)
+        sqlx::query(
+            "UPDATE task_leases SET status = 'expired', updated_at = ? WHERE project_dir = ? AND task_id = ?",
+        )
+        .bind(&now)
+        .bind(project_dir)
+        .bind(&task_id)
+        .execute(pool)
+        .await?;
+        let task = get_task(pool, project_dir, &task_id)
             .await?
             .ok_or_else(|| anyhow!("Task '{}' not found", task_id))?;
         if task.status == "claimed" || task.status == "running" {
-            sqlx::query("UPDATE tasks SET status = 'ready', updated_at = ? WHERE id = ?")
-                .bind(&now)
-                .bind(&task_id)
-                .execute(pool)
-                .await?;
+            sqlx::query(
+                "UPDATE tasks SET status = 'ready', updated_at = ? WHERE project_dir = ? AND id = ?",
+            )
+            .bind(&now)
+            .bind(project_dir)
+            .bind(&task_id)
+            .execute(pool)
+            .await?;
         }
         expired.push(TaskLease {
             task_id,

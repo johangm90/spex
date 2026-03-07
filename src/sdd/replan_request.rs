@@ -20,6 +20,7 @@ pub struct ReplanRequest {
 #[allow(clippy::too_many_arguments)]
 pub async fn create_replan_request(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     spec_id: &str,
     task_id: Option<&str>,
@@ -31,9 +32,11 @@ pub async fn create_replan_request(
     let now = Utc::now().to_rfc3339();
     let impact_json = serde_json::to_string(impact)?;
     sqlx::query(
-        "INSERT INTO replan_requests (id, spec_id, task_id, agent_id, reason, impact, proposed_action, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)"
+        "INSERT INTO replan_requests (id, project_dir, spec_id, task_id, agent_id, reason, impact, proposed_action, status, created_at, updated_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
     )
     .bind(id)
+    .bind(project_dir)
     .bind(spec_id)
     .bind(task_id)
     .bind(agent_id)
@@ -44,15 +47,20 @@ pub async fn create_replan_request(
     .bind(&now)
     .execute(pool)
     .await?;
-    get_replan_request(pool, id)
+    get_replan_request(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Replan request '{}' not found", id))
 }
 
-pub async fn get_replan_request(pool: &SqlitePool, id: &str) -> Result<Option<ReplanRequest>> {
+pub async fn get_replan_request(
+    pool: &SqlitePool,
+    project_dir: &str,
+    id: &str,
+) -> Result<Option<ReplanRequest>> {
     let row = sqlx::query_as::<_, (String, String, Option<String>, String, String, String, Option<String>, String, String, String)>(
-        "SELECT id, spec_id, task_id, agent_id, reason, impact, proposed_action, status, created_at, updated_at FROM replan_requests WHERE id = ?"
+        "SELECT id, spec_id, task_id, agent_id, reason, impact, proposed_action, status, created_at, updated_at FROM replan_requests WHERE project_dir = ? AND id = ?",
     )
+    .bind(project_dir)
     .bind(id)
     .fetch_optional(pool)
     .await?;
@@ -85,10 +93,13 @@ pub async fn get_replan_request(pool: &SqlitePool, id: &str) -> Result<Option<Re
 
 pub async fn list_replan_requests(
     pool: &SqlitePool,
+    project_dir: &str,
     spec_filter: Option<&str>,
     status_filter: Option<&str>,
 ) -> Result<Vec<ReplanRequest>> {
-    let mut query = String::from("SELECT id, spec_id, task_id, agent_id, reason, impact, proposed_action, status, created_at, updated_at FROM replan_requests WHERE 1=1");
+    let mut query = String::from(
+        "SELECT id, spec_id, task_id, agent_id, reason, impact, proposed_action, status, created_at, updated_at FROM replan_requests WHERE project_dir = ?",
+    );
     if spec_filter.is_some() {
         query.push_str(" AND spec_id = ?");
     }
@@ -111,6 +122,7 @@ pub async fn list_replan_requests(
             String,
         ),
     >(&query);
+    q = q.bind(project_dir);
     if let Some(spec) = spec_filter {
         q = q.bind(spec);
     }
@@ -150,17 +162,21 @@ pub async fn list_replan_requests(
 
 pub async fn update_replan_request(
     pool: &SqlitePool,
+    project_dir: &str,
     id: &str,
     status: &str,
 ) -> Result<ReplanRequest> {
     let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE replan_requests SET status = ?, updated_at = ? WHERE id = ?")
-        .bind(status)
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    get_replan_request(pool, id)
+    sqlx::query(
+        "UPDATE replan_requests SET status = ?, updated_at = ? WHERE project_dir = ? AND id = ?",
+    )
+    .bind(status)
+    .bind(&now)
+    .bind(project_dir)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    get_replan_request(pool, project_dir, id)
         .await?
         .ok_or_else(|| anyhow!("Replan request '{}' not found", id))
 }

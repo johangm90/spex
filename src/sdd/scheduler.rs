@@ -24,12 +24,13 @@ pub struct SchedulerDecision {
 
 pub async fn scheduler_next(
     pool: &SqlitePool,
+    project_dir: &str,
     spec_id: &str,
     agent: &str,
 ) -> Result<SchedulerDecision> {
-    let incidents = list_incidents(pool, Some(spec_id), None).await?;
-    let gaps = list_context_gaps(pool, Some(spec_id), None).await?;
-    let interrupts = list_interrupts(pool, Some(spec_id), None).await?;
+    let incidents = list_incidents(pool, project_dir, Some(spec_id), None).await?;
+    let gaps = list_context_gaps(pool, project_dir, Some(spec_id), None).await?;
+    let interrupts = list_interrupts(pool, project_dir, Some(spec_id), None).await?;
     let blocking_incidents = incidents
         .iter()
         .filter(|i| {
@@ -47,7 +48,7 @@ pub async fn scheduler_next(
         .iter()
         .filter(|it| it.status == "open" || it.status == "active")
         .count();
-    let active_plan = get_active_plan_version(pool, spec_id).await?;
+    let active_plan = get_active_plan_version(pool, project_dir, spec_id).await?;
 
     if blocking_incidents > 0 || blocking_gaps > 0 {
         return Ok(SchedulerDecision {
@@ -73,8 +74,8 @@ pub async fn scheduler_next(
         });
     }
 
-    let all_tasks = list_tasks(pool, Some(spec_id)).await?;
-    let active_locks = query_task_locks(pool, Some(spec_id), None, true).await?;
+    let all_tasks = list_tasks(pool, project_dir, Some(spec_id)).await?;
+    let active_locks = query_task_locks(pool, project_dir, Some(spec_id), None, true).await?;
     let mut candidates: Vec<Task> = all_tasks
         .iter()
         .filter(|t| t.agent == agent && t.status == "ready")
@@ -97,7 +98,7 @@ pub async fn scheduler_next(
 
     let mut skipped = Vec::new();
     for task in candidates {
-        if get_task_lease(pool, &task.id).await?.is_some() {
+        if get_task_lease(pool, project_dir, &task.id).await?.is_some() {
             skipped.push(format!("{} skipped: already leased", task.id));
             continue;
         }
