@@ -12,6 +12,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use cli::{
+    db_cmd::cmd_db_migrate_to_global,
     doctor::cmd_doctor,
     mcp_cmd::{cmd_mcp_serve, cmd_mcp_setup, resolve_project_dir},
     ops::{
@@ -178,6 +179,12 @@ pub enum Commands {
         /// Attempt automatic fixes
         #[arg(long)]
         fix: bool,
+    },
+
+    /// Database maintenance commands
+    Db {
+        #[command(subcommand)]
+        cmd: DbCmd,
     },
 }
 
@@ -615,6 +622,21 @@ pub enum SkillCmd {
     },
     /// List installed skills
     List,
+}
+
+// ─── Db Subcommands ───────────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum DbCmd {
+    /// Migrate a per-project .spex/state.db into the global DB
+    MigrateToGlobal {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(long)]
+        project_dir: Option<String>,
+        /// Print row counts but make no writes
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -1178,6 +1200,15 @@ async fn main() -> Result<()> {
         Commands::Doctor { fix } => {
             cmd_doctor(fix).await?;
         }
+
+        Commands::Db { cmd } => match cmd {
+            DbCmd::MigrateToGlobal {
+                project_dir,
+                dry_run,
+            } => {
+                cmd_db_migrate_to_global(project_dir.as_deref(), dry_run).await?;
+            }
+        },
     }
 
     Ok(())
