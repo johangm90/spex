@@ -41,6 +41,11 @@ artifacts, agent memory — lives exclusively in the MCP SQLite database.
 | `memory_get` | Retrieve a previously stored key/value pair for an agent |
 | `artifact_register` | Register a produced artifact (id, slice, task, agent, type, path, description) |
 | `artifact_query` | Query registered artifacts by slice, task, agent, or type |
+| `state_incident_create/get/update` | Persist and query bugs, regressions, and verification defects |
+| `state_context_gap_create/get/update` | Persist and query missing or contradictory context/docs |
+| `state_verification_run_create/get` | Persist and query structured verification evidence |
+| `state_interrupt_create/get/update` | Persist and query reprioritization or urgent preemption records |
+| `state_handoff_snapshot_create/get` | Persist and query resumable handoff snapshots |
 
 ### state_snapshot — project identity fields
 
@@ -90,6 +95,23 @@ Before using any MCP tool, verify the server is reachable by calling
 | `spex spec start SLICE-NNN` | `state_slice_update` with `status: "in_progress"` |
 
 ---
+
+### Operational Exception State
+
+Operational exceptions are first-class records in MCP state. Agents must not hide
+these conditions in prose only. Use the dedicated records below whenever they occur:
+
+- `incident` — bugs, regressions, failed gates, and other defects
+- `context_gap` — missing, outdated, contradictory, or undocumented behavior
+- `verification_run` — structured evidence for lint, tests, contracts, smoke checks, docs checks, or migration checks
+- `interrupt` — reprioritization, urgent work, or preemption
+- `handoff_snapshot` — resumable state captured before pausing or switching away
+
+**Blocking rule:** if an `incident` or `context_gap` is marked blocking, the orchestrator
+must not advance the affected slice until it is resolved, explicitly deferred, or escalated.
+
+**Stabilization rule:** a slice must pass through `stabilizing` before `done`.
+Primary implementation completion is not enough; verification evidence and exception cleanup are required.
 
 ### Agent Memory Protocol
 
@@ -162,6 +184,8 @@ acceptance_criteria:            # Must be non-empty for status >= review
 | `vision`          | High-level system architecture summary      | spex-architect  |
 | `slice_spec`      | Vertical slice definition                   | spex-architect  |
 | `task`            | Single implementation task                  | spex-orchestrate|
+| `verification_run`| Structured verification evidence            | spex-qa         |
+| `handoff_snapshot`| Resumable interrupted-work snapshot         | spex-orchestrate|
 | `adr`             | Architecture Decision Record                | spex-architect  |
 | `db_design`       | Database schema / entity model              | spex-db         |
 | `api_contract`    | OpenAPI / REST / event contract             | spex-backend    |

@@ -86,6 +86,17 @@ OPEN QUESTIONS: <list or "none">
 
 Git: see `_shared/conventions.md` § Git Protocol per Agent.
 
+
+## Operational Exceptions
+
+If this agent discovers a bug, regression, failed assumption, or missing/contradictory
+context while working:
+- report it clearly to `spex-orchestrate`
+- include enough detail for `state_incident_*` or `state_context_gap_*`
+- stop and wait if the ambiguity affects security, data integrity, migrations, public contracts, or rollout safety
+
+Do not hide these conditions in narrative-only handoff text.
+
 ## Git Protocol
 
 Commit directly to the current branch (default dev flow — no branch creation):

@@ -131,3 +131,13 @@ artifact_register(id="A0NN-N", slice="SLICE-NNN", task="T0NN-N",
 - Specify p50/p95 latency targets in the feature contract
 - Log token usage per request from day one
 - Reference `skills/_shared/conventions.md` for artifact envelope format
+
+## Operational Exceptions
+
+If this agent discovers a bug, regression, failed assumption, or missing/contradictory
+context while working:
+- report it clearly to `spex-orchestrate`
+- include enough detail for `state_incident_*` or `state_context_gap_*`
+- stop and wait if the ambiguity affects security, data integrity, migrations, public contracts, or rollout safety
+
+Do not hide these conditions in narrative-only handoff text.

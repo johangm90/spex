@@ -38,8 +38,8 @@ Invoke when:
 3. **Flag** any acceptance criterion that is untestable as written — push back to `spex-architect`
 4. **Create** the test plan artifact listing all test cases
 5. **Write** tests: unit (domain logic), integration (API), contract (events), E2E (UI flows)
-6. **Run** the test suite and document results in the test plan artifact
-7. **Report** pass/fail to `spex-orchestrate`; create bug reports for failures
+6. **Run** the test suite and record structured `verification_run` evidence for each meaningful verification step
+7. **Report** pass/fail to `spex-orchestrate`; ask it to open or update incidents for failures
 8. **Sign off** — when all gates pass:
    - Update test plan status to `validated`
    - Emit `QASignOff` event via MCP `state_event_emit`
@@ -61,6 +61,32 @@ Emit via `state_event_emit`:
 }
 ```
 
+## Verification Evidence
+
+`spex-qa` must record structured verification evidence in MCP, not just prose.
+
+For every meaningful verification step, create a `verification_run` with:
+- `kind`: `static|unit|integration|contract|e2e|smoke|migration|docs|observability`
+- `status`: `pass|pass_with_risk|fail|flaky|blocked`
+- `command`
+- `summary`
+- `evidence`
+
+### Failure Handling
+
+If verification fails:
+1. Do not emit `QASignOff`
+2. Report the failing area clearly
+3. Instruct `spex-orchestrate` to open or update an `incident`
+4. If the failure reveals missing validation coverage rather than implementation breakage, recommend `source=verification_gap`
+
+### Sign-off Rule
+
+`QASignOff` is only valid when:
+- required `verification_run` records exist
+- required runs are `pass` or explicitly accepted as `pass_with_risk`
+- no blocking incident remains open
+
 ### Verification Flow
 
 ```
@@ -74,6 +100,7 @@ Slice implemented → spex-qa runs tests → Gates checked → Report to spex-or
 | Artifact | ID Pattern | Description |
 |----------|-----------|-------------|
 | `test_plan` | `PROJ-TEST-NNN` | Test strategy and test case catalogue — stored in MCP |
+| `verification_run` | `VR-NNN` | Structured verification evidence for gates, regressions, and risk |
 
 Test plan must cover:
 - Happy path for every API endpoint or user flow
@@ -103,15 +130,16 @@ OPEN QUESTIONS: <list or "none">
 
 ## Git Protocol
 
-Commit directly to the current branch (default dev flow — no branch creation):
+Read-only git inspection is allowed when useful (`git status`, `git diff`, `git log`),
+but this agent does **not** perform git write operations. Do **not** run `git add`,
+`git commit`, `git checkout -b`, `git merge`, `git tag`, `git push`, or `gh pr create`.
 
-```
-git add <test files>
-git commit -m "test(<scope>): QA sign-off SLICE-NNN — <N>/<total> criteria passed — Refs: SLICE-NNN"
-```
+When the human wants these changes committed, branched, or turned into a PR, hand the
+request back to `spex-orchestrate` so it can delegate to `spex-gitops`, or tell the
+human to use `spex-gitops` directly if no orchestrator is involved.
 
-Do **not** include `ai/state.json`, `ai/events.jsonl`, or any MCP state files
-in commits — state is managed by the MCP server.
+Do **not** include `ai/state.json`, `ai/events.jsonl`, or any MCP-managed artifact
+content in repository commits.
 
 See `_shared/conventions.md` § Git Protocol per Agent.
 
@@ -154,6 +182,7 @@ memory_set(agent="spex-qa", key="artifact_PROJ-TEST-NNN", value=<test plan conte
 - Read all acceptance criteria before writing any test
 - Cover error paths and edge cases — that is where bugs hide
 - Emit `QASignOff` via `state_event_emit` MCP tool before reporting completion
+- Record required `verification_run` entries before sign-off
 - Update task status via `state_task_update` MCP tool when done
 - Treat coverage thresholds as a floor, not a target
 - Reference `skills/_shared/conventions.md` for envelope format and MCP tool reference

@@ -110,6 +110,17 @@ Invoke `spex-gitops` when:
 | CHANGELOG draft section | Markdown | Keep-a-Changelog format |
 | Branch naming validation report | Prose | Valid / invalid + suggested correction |
 
+
+## Operational Exceptions
+
+If this agent discovers a bug, regression, failed assumption, or missing/contradictory
+context while working:
+- report it clearly to `spex-orchestrate`
+- include enough detail for `state_incident_*` or `state_context_gap_*`
+- stop and wait if the ambiguity affects security, data integrity, migrations, public contracts, or rollout safety
+
+Do not hide these conditions in narrative-only handoff text.
+
 ## Git Protocol
 
 `spex-gitops` executes git commands directly:

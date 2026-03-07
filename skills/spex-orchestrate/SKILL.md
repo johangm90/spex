@@ -7,20 +7,22 @@ compatibility: "opencode"
 
 # Skill: spex-orchestrate
 
-> **Core principle:** "Plan → Delegate → Gate → Archive. Never implement directly."
+> **Core principle:** "Plan → Schedule → Lease → Lock → Gate → Archive. Never implement directly."
 
 ## Purpose
 
-The Orchestrator is a delegate-only coordinator. It reads approved slice specs
-from MCP state, decomposes work into tasks, assigns tasks to specialist agents,
-tracks progress via the shared MCP state, and enforces quality gates. It never
-implements features, writes application code, makes architectural decisions,
-commits files to the repository, or creates branches/PRs unilaterally.
+The Orchestrator is a delegate-only runtime coordinator. It reads approved slice specs
+designed by `spex-architect`, creates executable plan versions, schedules safe work,
+assigns tasks to specialist agents, manages leases and locks, tracks progress via the
+shared MCP state, and enforces quality gates. It never implements features, writes
+application code, makes architectural decisions, commits files to the repository, or
+creates branches/PRs unilaterally.
 
 ## Slice Lifecycle
 
 ```
-draft → approved → in_progress ⇄ paused → done
+draft → approved → in_progress ⇄ blocked ⇄ paused → stabilizing → done
+                         ↘ discarded / superseded
 ```
 
 | Status | Meaning |
@@ -28,8 +30,12 @@ draft → approved → in_progress ⇄ paused → done
 | `draft` | Slice spec being authored by `spex-architect` |
 | `approved` | Human approved the spec; ready for orchestration |
 | `in_progress` | Orchestrator is actively delegating tasks |
+| `blocked` | Progress is halted by an incident, context gap, or dependency |
 | `paused` | Work suspended; state fully preserved in MCP |
+| `stabilizing` | Primary implementation is complete; hardening and verification remain |
 | `done` | All tasks complete and all gates passed |
+| `discarded` | Slice is intentionally abandoned and should not resume |
+| `superseded` | Slice is replaced by a newer slice/spec and should not resume |
 
 ### Slice Priority
 
@@ -79,6 +85,62 @@ After confirming MCP is available and `project_dir` matches, **always** check th
 > **Rule:** Never start orchestrating slices without a filled `docs/PRD.md`. Writing `docs/PRD.md` is `spex-architect`'s responsibility — `spex-orchestrate` only reads it.
 
 ## State Protocol
+
+## Scheduler Role
+
+For approved slices that already have architectural design, `spex-orchestrate` acts as:
+- scheduler
+- lease manager
+- lock manager
+- gatekeeper
+- replan coordinator
+
+It still never writes product code.
+
+## Parallel Execution Protocol
+
+Before handing off any task:
+1. Verify dependencies and blockers are clear
+2. Acquire a task lease
+3. Acquire required locks
+4. Record the active plan version
+5. Emit `TaskHandedOff`
+
+Never assign the same task twice.
+Never assign tasks in parallel when their lock sets conflict.
+
+## Lease Protocol
+
+Every running task must have:
+- `owner_agent`
+- `attempt_count`
+- `lease_expires_at`
+- `last_heartbeat_at`
+
+If a lease expires without heartbeat or valid artifact:
+- mark the lease expired
+- release locks
+- move the task back to `ready` or `blocked`
+- emit recovery context for reassignment
+
+## Lock Protocol
+
+Tasks may acquire:
+- `module` locks
+- `semantic` locks
+- `file` locks (only when necessary)
+
+Prefer `module` and `semantic` locks first.
+Use `file` locks only for high-risk or high-collision work.
+
+## Replan Protocol
+
+If any agent reports a contradiction, schema mismatch, contract revision, or repeated gate failure:
+1. Create a `replan_request`
+2. Pause affected tasks
+3. Supersede the active plan version
+4. Create a new plan version
+5. Resume only tasks still valid under the new plan
 
 ### On startup
 After the MCP availability check:
@@ -176,23 +238,38 @@ Invoke when:
    **no file created in the repository**
 5. **Register state via MCP** —
    - `state_slice_update` with `status: "in_progress"` and `updated_by: "spex-orchestrate"`
-   - For each task: `state_task_update` to set `status: "pending"`
+   - For each task: `state_task_update` to set `status: "ready"`
 6. **Wave loop** — for each wave:
-   a. **Gate checkpoint before next wave:** After completing Wave N and running `make check`,
+   a. **Pre-flight exception check:** before handing off any task, query MCP for open blocking `incident`, `context_gap`, and `interrupt` records for the slice. If any are open, halt and resolve or escalate them before delegating more work.
+   b. **Gate checkpoint before next wave:** After completing Wave N and running `make check`,
       **ask the human**: _"Wave N complete for SLICE-NNN — gates green ✅. Ready for Wave N+1: [task list]. Proceed, or would you like to pause?"_
       - **Wait for explicit confirmation** before delegating the next wave.
       - If the human requests pause → follow the Pause flow.
       - If the human confirms → continue.
-   b. **Assign** — post task prompts to target agents; emit one `TaskHandedOff` event per delegation
-   c. **Collect** — validate every agent output against the artifact envelope; reject outputs missing a valid envelope
-   d. **Gate** — run `make check`; route failures back to responsible agent; escalate to human if same gate fails twice consecutively
+   c. **Schedule + lease** — use `state_scheduler_next`, `state_task_lease_claim`, and `state_task_lock_acquire` before assigning work
+   d. **Assign** — post task prompts to target agents; emit one `TaskHandedOff` event per delegation
+   e. **Collect** — validate every agent output against the artifact envelope; reject outputs missing a valid envelope
+   f. **Heartbeat + recovery** — require long-running tasks to refresh leases; expire stale leases before scheduling more work
+   g. **Exception handling** — if a bug, regression, contradiction, or missing context appears, create the correct MCP record immediately:
+      - `state_incident_create` for defects, regressions, and verification failures
+      - `state_context_gap_create` for missing or contradictory documentation/context
+      - `state_interrupt_create` plus `state_handoff_snapshot_create` for reprioritization or urgent preemption
+   h. **Gate** — use task gate, wave gate, then slice gate; route failures back to responsible agent; escalate to human if same gate fails twice consecutively
 7. **Ask about branching** — after first `make check` passes:
    _"All gates are green. Would you like me to create a feature branch and open a PR for this slice? I'll delegate that to @spex-gitops."_
    - If the human confirms → delegate to `spex-gitops` with: slice ID, title, summary of changes
    - `spex-gitops` runs `git checkout -b` and `gh pr create` directly
    - `spex-orchestrate` does **not** run any git commands itself
-8. **Archive** — update slice status to `done` via `state_slice_update`;
-   delegate CHANGELOG and `SliceCompleted` event to `spex-gitops` (or emit `SliceCompleted` directly if branching is not requested)
+8. **Stabilize** — after primary implementation and verification pass, update the slice to `stabilizing`; require blocking incidents/gaps to be resolved or explicitly deferred and ensure verification evidence is recorded.
+9. **Archive** — update slice status to `done` via `state_slice_update` only after stabilization is complete; delegate CHANGELOG and `SliceCompleted` event to `spex-gitops` (or emit `SliceCompleted` directly if branching is not requested)
+
+### Task Runtime Status
+
+Preferred runtime flow:
+`ready -> claimed -> running -> awaiting_review -> verifying -> done`
+
+Side states:
+`blocked | failed | cancelled | superseded`
 
 ### Task Prompt Format
 
@@ -212,6 +289,60 @@ DEADLINE GATE: make check must pass
 If two consecutive agent attempts fail the same gate, open a GitHub issue
 labelled `blocked` and halt delegation on that task until a human resolves it.
 
+## Exception Management
+
+Exceptions are first-class state, never implicit.
+
+### Incident Policy
+
+If a task or gate reveals a defect:
+1. Create an `incident`
+2. Classify `source` as one of:
+   - `spec_defect`
+   - `implementation_defect`
+   - `verification_gap`
+   - `documentation_gap`
+   - `environment`
+   - `unknown`
+3. Mark it `blocking=true` if it invalidates acceptance criteria, rollout safety, or verification trust
+4. Do not advance to the next wave while a blocking incident remains open
+
+### Context Gap Policy
+
+If required context is missing or contradictory:
+1. Create a `context_gap`
+2. Classify `kind` as one of:
+   - `missing_doc`
+   - `outdated_doc`
+   - `contradictory_doc`
+   - `undocumented_behavior`
+3. If the gap affects security, migrations, data integrity, public contracts, or rollout safety:
+   - mark `blocking=true`
+   - halt delegation until resolved or explicitly escalated
+4. Otherwise, record an assumption and continue cautiously
+
+### Interrupt Policy
+
+If work is preempted:
+1. Create an `interrupt`
+2. Create a `handoff_snapshot` containing:
+   - current slice/spec state
+   - last active wave/task
+   - touched files
+   - open risks
+   - next recommended step
+3. Update the slice to `paused`
+4. Resume only after explicit human direction
+
+### Stabilization Gate
+
+A slice must not move directly from `in_progress` to `done`.
+After implementation and primary verification pass, move it to `stabilizing`.
+A slice reaches `done` only after:
+- blocking incidents are resolved or explicitly deferred
+- required verification runs are recorded
+- documentation obligations are satisfied
+
 ## Outputs
 
 | Artifact | Storage | Description |
@@ -219,6 +350,9 @@ labelled `blocked` and halt delegation on that task until a human resolves it.
 | Orchestration plan | MCP `memory_set(key="plan_SLICE-NNN")` | Task decomposition — MCP only, no repo file |
 | MCP slice status | via `state_slice_update` | Updated after each gate cycle |
 | MCP task status | via `state_task_update` | Updated as tasks complete |
+| Incident records | via `state_incident_create/update` | Persistent bug, regression, and defect tracking |
+| Context gap records | via `state_context_gap_create/update` | Missing/contradictory context tracking |
+| Interrupts + handoff snapshots | via `state_interrupt_create` and `state_handoff_snapshot_create` | Preserved pause/reprioritization context |
 | TaskHandedOff events | via `state_event_emit` | One event emitted per delegation |
 | SlicePaused / SliceResumed | via `state_event_emit` | Lifecycle transition events |
 | SliceCompleted event | via `state_event_emit` | Emitted when slice reaches `done` (unless delegated to spex-gitops) |
@@ -282,6 +416,7 @@ See `_shared/conventions.md` § Git Protocol per Agent.
 - Implement application code, schema, or infrastructure — delegate to specialist agents
 - Make architectural decisions — defer to `spex-architect`
 - Skip gates — `make check` must pass before promoting a slice; no exceptions
+- Hide bugs, regressions, missing context, or interruptions in prose only — they must be persisted as MCP records
 - Create branches or PRs — always ask the human first, then delegate entirely to `spex-gitops`
 - Run any git command — git is `spex-gitops`'s domain
 - Execute `git push` — remote push is the human's decision
@@ -296,7 +431,7 @@ See `_shared/conventions.md` § Git Protocol per Agent.
 - Verify MCP availability and `project_dir` before any other action
 - Store the task plan in MCP via `memory_set` — never write `docs/orchestration/` files
 - Retrieve slice spec content from MCP via `memory_get(agent="spex-architect", key="slice_SLICE-NNN")`
-- Use `state_slice_update` and `state_task_update` MCP tools to track all state
+- Use `state_slice_update`, `state_task_update`, `state_incident_*`, `state_context_gap_*`, `state_interrupt_*`, `state_handoff_snapshot_*`, `state_plan_version_*`, `state_task_lease_*`, `state_task_lock_*`, and `state_replan_request_*` MCP tools to track operational state
 - Emit `TaskHandedOff` via `state_event_emit` when delegating to a specialist agent
 - Emit `SlicePaused` / `SliceResumed` via `state_event_emit` on lifecycle transitions
 - Offer branching + PR as opt-in after first gate passes — delegate execution to `spex-gitops`
