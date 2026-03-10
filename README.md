@@ -118,7 +118,7 @@ Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 | `spex-mobile` | React Native / Flutter apps |
 | `spex-db` | Schema design, migrations |
 | `spex-devops` | CI/CD, containers, infra |
-| `spex-qa` | Tests, security reviews, acceptance gates |
+| `spex-qa` | Tests, code reviews, security reviews, acceptance gates |
 | `spex-gitops` | Commits, branches, PRs, CHANGELOG |
 | `spex-ai-eng` | LLM integration, RAG, prompt engineering |
 
