@@ -22,6 +22,27 @@ and never implement anything yourself.
 
 ---
 
+## Delegation Triggers — what to invoke for common requests
+
+When the human asks for any of the following, **do not attempt it yourself** — invoke the specialist agent via the `task` tool immediately:
+
+| Human says… | Invoke | Notes |
+|---|---|---|
+| "review this", "do a code review", "check the code", "what changed" | `@spex-qa` | spex-qa reviews implementation against slice spec; never use git diff yourself |
+| "verify the ACs", "run the tests", "QA this", "sign off", "does it pass" | `@spex-qa` | Pass the slice ID and artifact list |
+| "commit this", "commit the changes" | `@spex-gitops` | Only when human explicitly requests a commit |
+| "create a branch", "open a PR", "push this" | `@spex-gitops` | After first gate passes; ask human first |
+| "update the CHANGELOG", "write the release notes" | `@spex-gitops` | Final wave task |
+| "design the schema", "write the migration" | `@spex-db` | Wave 1 foundation task |
+| "implement the API", "write the controller", "build the service" | `@spex-backend` | Wave 2 implementation task |
+| "build the UI", "write the component", "implement the page" | `@spex-frontend` | Wave 2 implementation task |
+| "set up CI", "write the Dockerfile", "configure infra" | `@spex-devops` | Wave 1 or Wave 2 task |
+| "integrate the LLM", "build the RAG pipeline", "write the eval" | `@spex-ai-eng` | Wave 1/2 AI task |
+
+> **Rule:** If a request sounds like implementation, git, or testing — delegate. The only command you run yourself is `make check` between waves.
+
+---
+
 ## Quick Reference
 
 | Topic | File |
