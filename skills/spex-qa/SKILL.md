@@ -1,14 +1,15 @@
 ---
 name: spex-qa
 description: >
-  QA verifier and security reviewer for the spex agent framework. Invoke when
-  you need to write tests for this feature, validate the acceptance criteria,
-  QA this slice, check if the implementation matches the spec, run a security
-  review, sign off on this, create a test plan, figure out what test cases we
-  need, or check if the tests cover edge cases. Use this skill to design test
-  plans before or after implementation, review AC testability, author security
-  threat models, and gate slice promotion with a formal QASignOff before any
-  slice can move to done.
+  QA verifier, security reviewer, and code reviewer for the spex agent framework.
+  Invoke when you need to write tests for this feature, validate the acceptance
+  criteria, QA this slice, check if the implementation matches the spec, run a
+  security review, sign off on this, create a test plan, figure out what test
+  cases we need, check if the tests cover edge cases, review this code, check
+  my PR, any issues here, roast my code, or check the security of this. Use
+  this skill to design test plans, review AC testability, author security threat
+  models, perform structured code reviews, and gate slice promotion with a
+  formal QASignOff before any slice can move to done.
 ---
 
 # Skill: spex-qa
@@ -24,6 +25,19 @@ description: >
 | [`references/testing-php.md`](references/testing-php.md) | PHPUnit unit + integration tests, Symfony WebTestCase, API Platform ApiTestCase, Doctrine fixtures, coverage config |
 | [`references/testing-js-e2e.md`](references/testing-js-e2e.md) | Vitest, Testing Library, MSW v2, Playwright POM + fixtures, k6 load tests |
 | [`references/security-review.md`](references/security-review.md) | STRIDE threat model, OWASP Top 10 2021 test cases, auth/authz checklist, input validation, dependency audit |
+
+---
+
+## Modes
+
+`spex-qa` operates in two modes. Use the appropriate mode based on what is being requested:
+
+| Mode | Trigger | Output |
+|------|---------|--------|
+| **Slice QA** | Slice delivered; needs test coverage, AC verification, security review, gate sign-off | Test plan artifact + `QASignOff` event |
+| **Code Review** | User shares code and asks for review, feedback, critique, "check my PR", "any issues?", "roast my code" | Structured review report (Summary + Findings + Score) |
+
+> **Code Review mode** activates whenever code is shared with an expectation of feedback — even without an explicit "review" request. If code is pasted with no message, use Code Review mode.
 
 ---
 
@@ -91,12 +105,17 @@ Run this on every slice. Full threat model and OWASP mapping in `references/secu
 
 ## Activation
 
-Invoke when:
+### Slice QA mode — invoke when:
 - A slice has been implemented and needs test coverage designed or validated
 - Test plans need to be created before implementation starts (TDD approach)
 - Acceptance criteria need to be reviewed for testability
 - A slice needs a gate-passage sign-off before status can move to `done`
 - A security threat model is required for a slice
+
+### Code Review mode — invoke when:
+- A user shares code and asks for a review, feedback, critique, or says things like "review this", "what do you think of this code", "check my PR", "any issues here?", "roast my code"
+- A partial review is requested: "check the security of this", "is this performant?", "does this look right?"
+- Code is pasted with no message but with an implicit expectation of feedback
 
 ---
 
@@ -104,15 +123,16 @@ Invoke when:
 
 | Input | Source | Required |
 |-------|--------|----------|
-| Slice spec | MCP `memory_get(agent="spex-architect", key="slice_SLICE-NNN")` | yes |
-| Current slice state | MCP `state_slice_get` | yes |
-| API contract | `memory_get(key="artifact_PROJ-API-NNN")` | yes |
-| DB design | `memory_get(key="artifact_PROJ-DB-NNN")` | yes |
+| Slice spec | MCP `memory_get(agent="spex-architect", key="slice_SLICE-NNN")` | yes (Slice QA mode) |
+| Current slice state | MCP `state_slice_get` | yes (Slice QA mode) |
+| API contract | `memory_get(key="artifact_PROJ-API-NNN")` | yes (Slice QA mode) |
+| DB design | `memory_get(key="artifact_PROJ-DB-NNN")` | yes (Slice QA mode) |
 | Implemented code | Current branch under review | yes |
+| Code snippet or PR | Provided by user or via tool | yes (Code Review mode) |
 
 ---
 
-## Process
+## Process — Slice QA Mode
 
 1. **Read** the slice spec and all acceptance criteria before writing any tests
 2. **Check** MCP state via `state_slice_get` to confirm the slice is `in_progress`
@@ -138,7 +158,113 @@ Slice implemented → spex-qa runs tests → All gates pass? → QASignOff + don
 
 ---
 
+## Process — Code Review Mode
+
+### Review Format
+
+Always structure the review as follows:
+
+#### 1. Summary (2–4 sentences)
+What does this code do? Is it generally in good shape, or does it have serious problems? Set the tone here.
+
+#### 2. Findings
+
+Each finding must include:
+- **Severity label** — one of: 🔴 Critical / 🟠 Warning / 🔵 Note / ✅ Praise
+- **Location** — file name and/or line number if available, otherwise a short code snippet
+- **What the issue is** — be specific, not vague
+- **Why it matters** — impact on correctness, security, performance, or maintainability
+- **How to fix it** — provide a concrete code example whenever possible
+
+#### 3. Overall Score
+Rate the code on a scale of 1–10, with a one-sentence justification.
+
+---
+
+### Severity Definitions
+
+| Label | Meaning |
+|-------|---------|
+| 🔴 Critical | Must fix before shipping. Exploitable bugs, security vulnerabilities, data loss, crashes. |
+| 🟠 Warning | Should fix. Logic errors, bad error handling, unhandled edge cases, insecure defaults. |
+| 🔵 Note | Worth knowing. Minor correctness concerns, defensive coding opportunities. |
+| ✅ Praise | Something done well — include when warranted, skip if nothing genuine to say. |
+
+> Skip findings that are purely stylistic unless they directly cause a correctness or security problem.
+
+---
+
+### Review Priorities (in order)
+
+1. **Correctness** — Does the code do what it's supposed to? Are there bugs, logic errors, or off-by-ones?
+2. **Security** — SQL injection, XSS, hardcoded secrets, improper auth, unsafe deserialization, path traversal, insecure defaults.
+3. **Error handling** — Are failures caught? Are errors surfaced meaningfully? Can bad input crash the program?
+4. **Edge cases** — Null/undefined inputs, empty collections, integer overflow, race conditions.
+
+> Do NOT flag style, formatting, naming conventions, or performance unless they directly cause a bug or security issue. Keep it signal-dense.
+
+---
+
+### Language-Specific Security and Bug Patterns
+
+#### JavaScript / TypeScript
+- `innerHTML` / `dangerouslySetInnerHTML` with unsanitized input → XSS 🔴
+- `eval()`, `Function()`, `setTimeout(string)` → code injection 🔴
+- Unhandled promise rejections, missing `await` → silent failures 🟠
+- Missing null/undefined checks on API responses or DOM access → crashes 🟠
+- `==` vs `===` for security-sensitive comparisons 🟠
+- Prototype pollution via `Object.assign` or merge utilities 🟠
+
+#### Python
+- f-string or `%`-formatted SQL queries → SQL injection 🔴
+- `pickle.loads` on untrusted input → RCE 🔴
+- `subprocess` / `os.system` with user input → command injection 🔴
+- Bare `except:` swallowing all errors including `KeyboardInterrupt` 🟠
+- Mutable default arguments (`def f(x=[])`) → state leak between calls 🟠
+- `assert` for input validation (stripped in optimized mode) 🟠
+
+#### PHP / Symfony
+- Direct use of `$_GET`/`$_POST` in queries without parameterization → SQL injection 🔴
+- `unserialize()` on untrusted input → RCE 🔴
+- Missing `#[IsGranted]` / `denyAccessUnlessGranted()` on controller actions → auth bypass 🔴
+- `eval()` or `preg_replace` with `/e` modifier → code injection 🔴
+- Missing CSRF token on state-mutating forms → CSRF 🟠
+- Hardcoded credentials in `.env.local` committed to git → secrets leak 🟠
+
+#### General (all languages)
+- Hardcoded credentials, API keys, or secrets in source → 🔴 Critical always
+- Missing authentication/authorization checks on endpoints → 🔴
+- Path traversal via unsanitized file paths → 🔴
+- Integer overflow in security-sensitive calculations → 🟠
+- TODO/FIXME near security-critical code → 🟠 (flag for review)
+
+---
+
+### Tone Guidelines
+
+- Be direct. Don't bury critical issues in gentle phrasing.
+- Be specific. "This could be better" is useless. "Line 34: using `innerHTML` with unsanitized user input enables XSS" is useful.
+- Be kind. The goal is improvement, not humiliation.
+- Acknowledge good work. If something is well-written, say so.
+- If you'd write it differently but it's not wrong, make it a 🔵 Note, not a 🔴 Critical.
+
+---
+
+### Code Review Edge Cases
+
+| Situation | Behaviour |
+|-----------|-----------|
+| Very short snippet (< 10 lines) | Full review — even small functions can have bugs. Be concise, don't pad. |
+| Large file (> 300 lines) | Focus on highest-priority findings. Say "I'm highlighting the top findings — ask me to dig into any section." |
+| No context given | Make reasonable assumptions. State those assumptions in the summary. |
+| User asks for a specific focus (e.g. "just check security") | Honor that focus, but always flag any 🔴 Critical issues outside that scope. |
+| Code that is completely fine | High score, note what's done well, offer 1–2 🔵 Notes for polish. Don't invent problems. |
+
+---
+
 ## Outputs
+
+### Slice QA Mode
 
 | Artifact | ID Pattern | Description |
 |----------|-----------|-------------|
@@ -162,9 +288,13 @@ Test plan must cover:
 
 Coverage is a **floor**, not a target. Do not stop at 80% if important paths remain untested.
 
+### Code Review Mode
+
+Output a structured review report inline (no MCP artifact required for ad-hoc reviews). For slice-scoped reviews requested by `spex-orchestrate`, register the review as a `security_review` artifact in MCP.
+
 ---
 
-## Handoff
+## Handoff (Slice QA Mode)
 
 Report to `spex-orchestrate` using the standard envelope:
 
@@ -191,6 +321,7 @@ Do **not** include MCP state files in commits.
 
 ## Delivery Checklist
 
+### Slice QA Mode
 - [ ] MCP state check completed; slice confirmed `in_progress`
 - [ ] All acceptance criteria read and assessed with the testability rubric
 - [ ] Untestable criteria flagged to `spex-architect`
@@ -207,3 +338,11 @@ Do **not** include MCP state files in commits.
 - [ ] `QASignOff` event emitted via `state_event_emit`
 - [ ] Task status updated to `done` via `state_task_update`
 - [ ] Handoff envelope reported to `spex-orchestrate`
+
+### Code Review Mode
+- [ ] Summary written (2–4 sentences)
+- [ ] All 🔴 Critical findings documented with location, issue, impact, and fix
+- [ ] All 🟠 Warning findings documented
+- [ ] Language-specific security patterns checked
+- [ ] Overall score given with justification
+- [ ] Tone is direct, specific, and constructive

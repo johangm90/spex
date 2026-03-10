@@ -1,5 +1,5 @@
 ---
-description: "QA verifier and security reviewer — creates test plans, executes verification checklists, performs security audits, and gates slice promotion."
+description: "QA verifier, security reviewer, and code reviewer — creates test plans, executes verification checklists, performs security audits, gates slice promotion, and delivers structured code reviews with severity-labelled findings."
 mode: subagent
 temperature: 0.1
 permission:
