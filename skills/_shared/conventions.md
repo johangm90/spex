@@ -12,7 +12,7 @@ All agents **must** use the shared persistent SQLite state exposed via the
 or spec files to the project repository.** All state — slices, tasks, events,
 artifacts, agent memory — lives exclusively in the MCP SQLite database.
 
-> **Repository hygiene rule:** Do **not** create `ai/`, `docs/slices/`,
+> **Repository hygiene rule:** Do **not** create `docs/slices/`,
 > `docs/orchestration/`, `docs/db/`, `docs/api/`, `docs/exploration/`,
 > `docs/security/`, `docs/ops/`, `docs/releases/`, or any other state/artifact
 > directory in the target project repository.
@@ -41,6 +41,34 @@ artifacts, agent memory — lives exclusively in the MCP SQLite database.
 | `memory_get` | Retrieve a previously stored key/value pair for an agent |
 | `artifact_register` | Register a produced artifact (id, slice, task, agent, type, path, description) |
 | `artifact_query` | Query registered artifacts by slice, task, agent, or type |
+| `state_prd_get` | Read `docs/PRD.md`, returns `exists`, `is_template`, and `content` |
+
+### OpenCode MCP Tool Invocation Format
+
+In OpenCode, MCP tools are invoked with the server name as a prefix and an underscore separator:
+
+```
+<server-name>_<tool-name>
+```
+
+For the `spex-state` server, the fully-qualified OpenCode tool names are:
+
+| Shorthand (used in docs) | OpenCode invocation name |
+|--------------------------|--------------------------|
+| `state_snapshot` | `spex-state_state_snapshot` |
+| `state_slice_get` | `spex-state_state_slice_get` |
+| `state_slice_update` | `spex-state_state_slice_update` |
+| `state_task_get` | `spex-state_state_task_get` |
+| `state_task_update` | `spex-state_state_task_update` |
+| `state_event_emit` | `spex-state_state_event_emit` |
+| `state_event_query` | `spex-state_state_event_query` |
+| `memory_set` | `spex-state_memory_set` |
+| `memory_get` | `spex-state_memory_get` |
+| `artifact_register` | `spex-state_artifact_register` |
+| `artifact_query` | `spex-state_artifact_query` |
+| `state_prd_get` | `spex-state_state_prd_get` |
+
+> **Per the official Agent Skills documentation:** Always use fully-qualified tool names to avoid “tool not found” errors. Skill SKILL.md files use shorthand for readability; when Claude invokes tools it must use the OpenCode invocation name above.
 
 ### state_snapshot — project identity fields
 
@@ -67,14 +95,12 @@ Before using any MCP tool, verify the server is reachable by calling
 > **Never skip this check.** Operating without the MCP server means agents work
 > in isolation with no shared state, producing inconsistent results.
 
-### Mapping: Old file references → MCP tools
+### Mapping: Old patterns → MCP tools
 
-| Old reference | Use instead |
-|---------------|-------------|
-| `ai/state.json` (read) | `state_snapshot` or `state_slice_get` / `state_task_get` |
-| `ai/state.json` (write) | `state_slice_update` / `state_task_update` |
-| `ai/events.jsonl` (append) | `state_event_emit` |
-| `ai/events.jsonl` (read) | `state_event_query` |
+These are the MCP equivalents of patterns that no longer apply:
+
+| Old pattern | Use instead |
+|-------------|-------------|
 | `docs/slices/SLICE-NNN.md` (read/write) | `state_slice_get` / `state_slice_update` + `memory_get/set` |
 | `docs/orchestration/SLICE-NNN-plan.md` | `memory_set(agent="spex-orchestrate", key="plan_SLICE-NNN", value=<content>)` |
 | `docs/db/PROJ-DB-NNN.md` | `artifact_register` + `memory_set(key="artifact_PROJ-DB-NNN", value=<content>)` |
@@ -87,7 +113,6 @@ Before using any MCP tool, verify the server is reachable by calling
 | `spex task done TASK-NNN` | `state_task_update` with `status: "done"` |
 | `spex spec done SLICE-NNN` | `state_slice_update` with `status: "done"` |
 | `spex mcp serve -> spec_update(status="paused")` | `state_slice_update` with `status: "paused"` |
-| `spex spec start SLICE-NNN` | `state_slice_update` with `status: "in_progress"` |
 
 ---
 
@@ -218,7 +243,7 @@ git commit -m "<type>(<scope>): <description> — Refs: SLICE-NNN / TASK-NNN"
 ```
 
 **Never commit:**
-- `ai/` directory or any MCP state files
+- MCP state files or any spex framework state
 - `docs/slices/`, `docs/orchestration/`, `docs/db/`, `docs/api/`,
   `docs/exploration/`, `docs/security/`, `docs/ops/`, `docs/releases/`
 - Any artifact whose content is managed by the MCP server
@@ -300,7 +325,7 @@ OPEN QUESTIONS: <list or "none">
 ## Typed Handoff Events
 
 All inter-agent handoffs are recorded as typed events via `state_event_emit`
-MCP tool. **Do not write to `ai/events.jsonl` or any file.**
+MCP tool. **Do not write state to any file.**
 
 ### TaskHandedOff
 

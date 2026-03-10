@@ -1,151 +1,413 @@
 ---
-name: "spex-mobile"
-description: "Mobile implementer — builds React Native and Flutter apps (Swift/Kotlin for native modules). Handles app store configs, deep linking, push notifications, and offline-first patterns."
-license: "MIT"
-compatibility: "opencode"
+name: spex-mobile
+description: >
+  Use this skill when asked to build a native Android app (Kotlin, Jetpack Compose,
+  MVVM/MVI, Coroutines, Hilt, Room), a native iOS app (Swift, SwiftUI, async/await,
+  Combine, SwiftData), or a Kotlin Multiplatform / Compose Multiplatform (KMP/CMP)
+  shared codebase. Also use for writing Kotlin or Swift native modules, designing
+  shared KMP business logic, deciding between MVVM and MVI, implementing offline-first
+  patterns on mobile, setting up Hilt DI, Room/SQLDelight databases, or integrating
+  Ktor for cross-platform networking. Triggers: Android, iOS, Kotlin, Swift, Compose,
+  SwiftUI, KMP, KMM, CMP, Jetpack, Hilt, Room, Ktor, SQLDelight, mobile architecture.
 ---
 
 # Skill: spex-mobile
 
-## Purpose
+You are a senior mobile engineer and architect with deep expertise in:
+- **Android**: Kotlin, Jetpack Compose, MVVM/MVI, Coroutines, Hilt, Room, Gradle
+- **iOS**: Swift, SwiftUI, async/await, Combine, Xcode toolchain
+- **KMP/CMP**: Kotlin Multiplatform + Compose Multiplatform, shared business logic, `expect`/`actual`, Ktor, SQLDelight
 
-`spex-mobile` is the mobile implementer for cross-platform and native mobile
-applications. **React Native is the primary stack; Flutter is the secondary stack;
-Swift (iOS) and Kotlin (Android) are used for native modules only.** Web UI is
-`spex-frontend`'s domain — `spex-mobile` never writes web components. This skill
-covers the full mobile implementation lifecycle: screens and navigation, API
-integration, platform-specific APIs (permissions, deep linking, push notifications),
-offline-first data patterns, native module bindings, unit and E2E tests, and app
-store configuration. It coordinates upstream with `spex-frontend` (component specs and
-design tokens) and downstream with `spex-backend` (API contracts).
+## Platform Reference Files
 
-## When to Use
+| File | Contents |
+|------|----------|
+| [references/android.md](references/android.md) | Compose patterns, Hilt DI, ViewModel/Coroutines, Room, Navigation, animations, WorkManager, testing |
+| [references/ios.md](references/ios.md) | SwiftUI patterns, async/await, navigation, SwiftData/Core Data, Combine, testing, Instruments |
+| [references/kmp.md](references/kmp.md) | Project structure, expect/actual, Ktor, SQLDelight, iOS interop (SKIE/KMP-NativeCoroutines), CMP shared UI, testing |
+| [references/mcp-protocol.md](references/mcp-protocol.md) | spex framework MCP integration (state check, artifact_register, handoff envelope) |
 
-Invoke `spex-mobile` when:
-- A new mobile screen or user flow needs to be implemented (iOS, Android, or both)
-- A native module is required that cannot be handled by the cross-platform runtime
-  (camera, Bluetooth, biometrics, background tasks)
-- App store submission preparation is needed (Info.plist, AndroidManifest.xml,
-  app.json, signing config, store listing metadata)
-- Push notification setup or deep linking configuration is required
-- An offline-first sync pattern needs to be implemented (local queue, conflict
-  resolution, background sync)
+---
 
-## MCP State Check (mandatory at startup)
+## Architecture Decision Framework
 
-Before any other action, verify the shared persistent memory is available:
+### MVVM vs MVI — when to use which
 
-1. Call `state_snapshot` via the `spex-state` MCP tools.
-2. Verify `project_dir` in the response matches the current project directory.
-3. If the call **succeeds** → proceed normally.
-4. If the call **fails** (tool unavailable or error):
-   - Inform the human: _"The `spex-state` MCP server is not available. This is required for shared memory. May I run `spex mcp setup` to configure it?"_
-   - **Wait** for explicit human approval before running the setup.
-   - After approval, run `spex mcp setup` then retry `state_snapshot`.
+| Signal | Use MVVM | Use MVI |
+|--------|----------|---------|
+| Screen complexity | Simple–medium | Complex, many states |
+| Team familiarity | Default choice | Already using Redux/Flux |
+| Undo/redo needed | ✗ | ✓ |
+| State reproducibility tests | Less critical | Critical |
+| Android Jetpack integration | `ViewModel` + `StateFlow` + `collectAsStateWithLifecycle` | Same foundation, stricter intent routing |
 
-## Input Requirements
+**Rule of thumb**: Start with MVVM. Migrate to MVI if you're writing many `when (state)` branches across multiple features and finding state bugs hard to reproduce.
 
-| Input | Description |
-|-------|-------------|
-| Slice spec | MCP `memory_get(agent="spex-architect", key="slice_SLICE-NNN")` (approved) |
-| API contract | `memory_get(key="artifact_PROJ-API-NNN")` from `spex-backend` |
-| `spex-frontend` component spec | `memory_get(agent="spex-frontend", key="artifact_A0NN-N")` — component props, states, variants, design tokens (if available) |
-| Platform target | iOS, Android, or both |
-| Environment config | API base URL, push notification keys, deep link scheme |
+---
 
-## Process
+## MVVM — Canonical Implementation
 
-1. **Read** the slice spec, API contract, and `spex-frontend` component spec before
-   writing any code
-2. **Scaffold screens** — implement screens/components per the `spex-frontend` spec;
-   wire navigation (React Navigation or Flutter Navigator)
-3. **Wire to API** — integrate API endpoints from the `spex-backend` contract;
-   handle loading, error, and empty states
-4. **Handle platform APIs** — implement permission requests (camera, location,
-   notifications), deep link handlers, and push notification registration
-5. **Offline-first logic** — implement local queue for writes, optimistic updates,
-   conflict resolution strategy, and background sync where required
-6. **Unit tests** — test screen logic, hooks, reducers, and service layer;
-   mock API calls
-7. **E2E tests** — write Detox (React Native) or Flutter integration tests for
-   critical user flows
-8. **App store config** — update `Info.plist` (iOS), `AndroidManifest.xml`
-   (Android), and `app.json` / `app.config.js` (Expo) with required permissions,
-   deep link schemes, and metadata
-9. **Run `make check`** and confirm all gates pass before declaring done
+### Android (Kotlin + Compose)
 
-## Output Contract
+```kotlin
+// 1. UI State — immutable data class
+data class ProfileUiState(
+    val profile: Profile? = null,
+    val isLoading: Boolean = false,
+    val error: String? = null
+)
 
-| Deliverable | Description |
-|-------------|-------------|
-| Screens / components | Platform-appropriate UI components wired to navigation |
-| Navigation setup | Stack, tab, and modal navigation configuration |
-| Native module bindings | JS/TS bridge code for Swift/Kotlin native modules |
-| Platform config files | `Info.plist`, `AndroidManifest.xml`, `app.json` / `app.config.js` |
-| Unit tests | Screen logic, hooks, service layer |
-| E2E tests | Detox or Flutter integration test suites for critical flows |
-| Offline queue implementation | Local write queue with idempotent retry logic |
+// 2. ViewModel
+@HiltViewModel
+class ProfileViewModel @Inject constructor(
+    private val profileRepo: ProfileRepository
+) : ViewModel() {
+    private val _state = MutableStateFlow(ProfileUiState())
+    val state: StateFlow<ProfileUiState> = _state.asStateFlow()
 
-## Forbidden Actions
+    // One-shot events: navigation, snackbars
+    private val _events = Channel<ProfileEvent>(Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
 
-- **Never write web UI code** — web components, HTML, CSS, and browser-targeting
-  JavaScript belong to `spex-frontend`
-- **Never write backend business logic** — API endpoints, database schemas, and
-  server-side services belong to `spex-backend` and `spex-db`
-- **Never submit directly to app stores without human approval** — store
-  submissions (App Store Connect, Google Play Console) require explicit human sign-off
-- **Never hardcode API keys, secrets, or credentials in the mobile bundle** — use
-  environment variables, `expo-constants`, or the platform secure storage APIs;
-  secrets in the bundle are a security violation
-- **Never run `git push`** — remote operations are the human's decision
+    fun load(userId: String) = viewModelScope.launch {
+        _state.update { it.copy(isLoading = true) }
+        profileRepo.getProfile(userId)
+            .onSuccess { p -> _state.update { it.copy(profile = p, isLoading = false) } }
+            .onFailure { e -> _state.update { it.copy(error = e.message, isLoading = false) } }
+    }
+}
 
-## Git Protocol
+// 3. Composable — collect state with lifecycle awareness
+@Composable
+fun ProfileScreen(
+    viewModel: ProfileViewModel = hiltViewModel(),
+    onNavigateBack: () -> Unit
+) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-| Moment | Git action |
-|--------|-----------|
-| Finishes an assigned task | `git add <own files> && git commit -m "feat(mobile): <description> — Refs: TASK-NNN"` |
+    LaunchedEffect(lifecycleOwner) {
+        viewModel.events.flowWithLifecycle(lifecycleOwner.lifecycle)
+            .collect { event ->
+                when (event) {
+                    ProfileEvent.NavigateBack -> onNavigateBack()
+                }
+            }
+    }
 
-- Commit only files you own (screens, components, tests, config)
-- Never run `git push`
-- Reference the task ID in every commit message
-
-## State Protocol
-
-### On startup
-After the MCP availability check:
-1. `memory_get(agent="spex-mobile", key="session_context")` — restore last task/file context.
-2. If found, display: _"Resuming: last worked on [task] — [summary]."_
-
-### On task completion
-```
-memory_set(agent="spex-mobile", key="session_context", value=JSON.stringify({
-  slice: "SLICE-NNN", task: "T0NN-N", files_changed: ["path/to/Screen.tsx"],
-  summary: "one sentence", timestamp: new Date().toISOString()
-}))
+    when {
+        state.isLoading -> CircularProgressIndicator()
+        state.error != null -> ErrorState(state.error!!, onRetry = { viewModel.load(userId) })
+        state.profile != null -> ProfileContent(state.profile!!)
+    }
+}
 ```
 
-### On artifact production
-```
-artifact_register(id="A0NN-N", slice="SLICE-NNN", task="T0NN-N",
-  agent="spex-mobile", type="code", path="src/...", description="...")
+### iOS (Swift + SwiftUI)
+
+```swift
+// 1. ViewModel (iOS 17+ @Observable)
+@Observable
+class ProfileViewModel {
+    var profile: Profile?
+    var isLoading = false
+    var error: String?
+
+    private let repo: ProfileRepository
+
+    init(repo: ProfileRepository = .live) {
+        self.repo = repo
+    }
+
+    func load(userId: String) async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            profile = try await repo.fetchProfile(userId)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+// 2. View
+struct ProfileView: View {
+    @State private var vm = ProfileViewModel()
+    let userId: String
+
+    var body: some View {
+        Group {
+            if vm.isLoading {
+                ProgressView()
+            } else if let profile = vm.profile {
+                ProfileContent(profile: profile)
+            } else if let error = vm.error {
+                ErrorView(message: error, onRetry: { Task { await vm.load(userId: userId) } })
+            }
+        }
+        .task { await vm.load(userId: userId) }
+        .navigationTitle("Profile")
+    }
+}
 ```
 
-## Rules
+---
 
-1. **Secrets in secure storage only** — API keys, tokens, and credentials must
-   live in Keychain (iOS) or Keystore (Android), or in environment variables
-   managed outside the bundle. Never in source code or AsyncStorage.
-2. **Deep links must be validated server-side** — do not trust deep link payloads
-   without server-side verification; URL scheme hijacking is a real attack vector.
-3. **Offline queue must be idempotent** — every queued write operation must be
-   safe to replay; include an idempotency key in all mutation requests.
-4. **Accessibility is non-optional** — implement VoiceOver (iOS) and TalkBack
-   (Android) labels for all interactive elements. Do not ship a screen without
-   accessibility labels.
-5. **Test on both platforms** — if the target is both iOS and Android, E2E tests
-   must cover both platforms.
-6. **No direct store submission** — always flag store submission as a human gate.
-7. **Coordinate with `spex-frontend`** — consume the component spec and design tokens;
-   do not invent visual design independently.
-8. **Reference `_shared/conventions.md`** for artifact envelope format and commit
-   conventions.
+## MVI — Canonical Implementation
+
+### Android (Kotlin + Compose)
+
+```kotlin
+// 1. Contract
+sealed interface ProfileIntent {
+    data class Load(val userId: String) : ProfileIntent
+    object Retry : ProfileIntent
+}
+
+data class ProfileState(
+    val profile: Profile? = null,
+    val isLoading: Boolean = false,
+    val error: String? = null
+)
+
+sealed interface ProfileEffect {
+    data class ShowSnackbar(val message: String) : ProfileEffect
+    object NavigateBack : ProfileEffect
+}
+
+// 2. ViewModel as Intent processor
+@HiltViewModel
+class ProfileViewModel @Inject constructor(
+    private val repo: ProfileRepository
+) : ViewModel() {
+    private val _state = MutableStateFlow(ProfileState())
+    val state = _state.asStateFlow()
+
+    private val _effects = Channel<ProfileEffect>(Channel.BUFFERED)
+    val effects = _effects.receiveAsFlow()
+
+    fun dispatch(intent: ProfileIntent) {
+        when (intent) {
+            is ProfileIntent.Load -> loadProfile(intent.userId)
+            ProfileIntent.Retry -> _state.value.run { loadProfile(/* last userId */) }
+        }
+    }
+
+    private fun loadProfile(userId: String) = viewModelScope.launch {
+        _state.update { it.copy(isLoading = true, error = null) }
+        repo.getProfile(userId)
+            .onSuccess { p -> _state.update { it.copy(profile = p, isLoading = false) } }
+            .onFailure { e ->
+                _state.update { it.copy(error = e.message, isLoading = false) }
+                _effects.send(ProfileEffect.ShowSnackbar("Failed: ${e.message}"))
+            }
+    }
+}
+
+// 3. Composable
+@Composable
+fun ProfileScreen(vm: ProfileViewModel = hiltViewModel(), userId: String) {
+    val state by vm.state.collectAsStateWithLifecycle()
+    // collect effects similarly to MVVM events pattern
+    LaunchedEffect(Unit) { vm.dispatch(ProfileIntent.Load(userId)) }
+    // render state...
+}
+```
+
+---
+
+## Clean Architecture Layers
+
+```
+┌─────────────────────────────────────────────┐
+│  Presentation Layer                         │
+│  Compose UI / SwiftUI views                 │
+│  ViewModel / @Observable                    │
+│  UiState, Intent, Effect/Event sealed types │
+├─────────────────────────────────────────────┤
+│  Domain Layer  (no Android/iOS imports)     │
+│  Use cases (single-responsibility)          │
+│  Domain models                              │
+│  Repository interfaces                      │
+├─────────────────────────────────────────────┤
+│  Data Layer                                 │
+│  Repository implementations                 │
+│  Remote data sources (Retrofit / Ktor)      │
+│  Local data sources (Room / SQLDelight)     │
+│  DTOs + mappers                             │
+└─────────────────────────────────────────────┘
+```
+
+**Rules:**
+- Domain layer has **zero** platform imports — pure Kotlin/Swift
+- Presentation depends on Domain; Data depends on Domain — never the reverse
+- Mappers live at the boundary: DTO→Domain in Data, Domain→UiState in Presentation
+- Use cases are optional for simple CRUD but required for orchestrating multiple repos
+
+---
+
+## Jetpack Compose Deep Patterns
+
+### Recomposition control
+
+```kotlin
+// ❌ Lambda captures cause unnecessary recompositions
+LazyColumn {
+    items(list) { item ->
+        ItemRow(item, onClick = { viewModel.select(item.id) }) // new lambda each compose
+    }
+}
+
+// ✅ Stable key + remembered lambda
+LazyColumn {
+    items(list, key = { it.id }) { item ->
+        val onClick = remember(item.id) { { viewModel.select(item.id) } }
+        ItemRow(item, onClick = onClick)
+    }
+}
+
+// ✅ @Stable on custom classes used as Compose parameters
+@Stable
+data class UserCardState(val name: String, val avatarUrl: String)
+```
+
+### Side effects cheat-sheet
+
+| Effect | Use when |
+|--------|----------|
+| `LaunchedEffect(key)` | Run suspend code; re-run when key changes |
+| `DisposableEffect(key)` | Register/unregister listeners; cleanup via `onDispose` |
+| `SideEffect` | Sync Compose state → non-Compose system (e.g. analytics) |
+| `rememberCoroutineScope()` | Trigger coroutines from callbacks (button click) |
+| `produceState` | Convert non-Compose observable → Compose State |
+
+### Compose performance checklist
+- [ ] Use `LazyColumn`/`LazyRow` for any list > 10 items
+- [ ] Provide stable `key` in `LazyColumn { items(key=) }`
+- [ ] Annotate state holder classes with `@Stable` or `@Immutable`
+- [ ] Extract lambdas out of frequently recomposed scopes
+- [ ] Enable and check **Compose compiler metrics** in CI
+
+---
+
+## SwiftUI Deep Patterns
+
+### View decomposition
+
+```swift
+// ❌ Monolithic view — hard to test and reuse
+struct FeedView: View {
+    var body: some View {
+        // 200 lines mixing layout, logic, data fetching
+    }
+}
+
+// ✅ Decomposed — each piece is independently previewable
+struct FeedView: View {
+    @State private var vm = FeedViewModel()
+    var body: some View {
+        FeedList(items: vm.items, onTap: vm.select)
+            .overlay { if vm.isLoading { LoadingOverlay() } }
+            .task { await vm.loadFeed() }
+    }
+}
+
+struct FeedList: View {
+    let items: [FeedItem]
+    let onTap: (FeedItem) -> Void
+    var body: some View {
+        List(items) { item in
+            FeedRow(item: item).onTapGesture { onTap(item) }
+        }
+    }
+}
+```
+
+### SwiftUI performance
+- Prefer `List` (lazy) over `ForEach` in `ScrollView` for large data sets
+- Use `.id()` modifier sparingly — forces full re-render
+- `@Observable` (iOS 17+) is more efficient than `ObservableObject` — only invalidates views that read changed properties
+- Profile with **Instruments → SwiftUI template** to identify redundant body evaluations
+
+---
+
+## Performance & Memory
+
+### Android
+
+| Issue | Symptom | Fix |
+|-------|---------|-----|
+| Excessive recomposition | Janky list scrolling | `@Stable`/`@Immutable`, stable keys |
+| Memory leak | Crash after rotation | Don't hold Activity/Context in ViewModel |
+| Skipped frames | Profiler shows > 16 ms | Move work off Main → `Dispatchers.IO/Default` |
+| Large APK | Store install drop-off | R8 + ProGuard, enable App Bundle |
+| Slow startup | ANR on launch | Lazy DI init, App Startup library |
+
+### iOS
+
+| Issue | Symptom | Fix |
+|-------|---------|-----|
+| Retain cycle | Memory grows unbounded | `[weak self]` in closures, `weak var delegate` |
+| Main thread block | UI freeze / watchdog kill | Move work to background `Task` / `async` |
+| Excessive body calls | Janky scrolling | `@Observable` precision, `.equatable()` |
+| Large binary | App Store size warnings | Strip debug symbols in Release, asset catalogs |
+| Slow launch | Time-to-interactive > 400 ms | Defer non-critical init, use `@MainActor` lazily |
+
+### KMP shared layer
+- Use `Dispatchers.IO` for all I/O in `commonMain`
+- SQLDelight queries return `Flow` — observe on the correct dispatcher
+- Ktor: configure `HttpTimeout`; add retry with exponential backoff
+- Avoid `Dispatchers.Main` in shared code — let platform apps dispatch to UI thread
+
+---
+
+## Debugging Guide
+
+### What to ask first
+1. Does it crash, hang, or produce wrong output?
+2. Does it happen on one platform or both? (KMP bug or platform bug?)
+3. Does it reproduce in a fresh install? (State corruption vs. logic bug)
+4. Is it in the Presentation, Domain, or Data layer?
+
+### Crash pattern recognition
+
+| Logcat / Console pattern | Likely cause | Fix |
+|--------------------------|--------------|-----|
+| `NullPointerException` on ViewModel | Fragment re-attached after process death | Use `SavedStateHandle` |
+| `IllegalStateException: Flow collect from wrong context` | Collecting Flow on wrong dispatcher | Use `flowOn(Dispatchers.Main)` or `collectAsStateWithLifecycle` |
+| `EXC_BAD_ACCESS` (iOS) | Dangling reference in old memory model | Check pre-1.7.20 KMP deps; update |
+| `kotlinx.coroutines.JobCancellationException` | ViewModelScope cancelled mid-operation | Normal on back-press; guard only if unexpected |
+| `Thread 1: signal SIGABRT` (iOS) | Force-unwrap of nil optional | Replace `!` with `guard let` or `if let` |
+| `ANR InputDispatching` (Android) | Main thread blocked > 5 s | Move I/O to `Dispatchers.IO` |
+| Blank screen (no error) | State not emitted to UI | Check `collectAsStateWithLifecycle` vs `collectAsState` lifecycle awareness |
+
+### Memory debugging tools
+- **Android**: Android Studio Memory Profiler, LeakCanary
+- **iOS**: Instruments → Allocations + Leaks, Xcode Memory Graph
+- **KMP**: Kotlin/Native memory model introspection (post-1.7.20 mostly self-managed)
+
+---
+
+## Feature Writing Checklist
+
+- [ ] Architecture layer chosen (MVVM or MVI) and documented in PR
+- [ ] Domain models defined in `commonMain` (KMP) or Domain layer (platform-only)
+- [ ] Repository interface defined in Domain; implementation in Data
+- [ ] ViewModel / `@Observable` created; UiState modelled as immutable data class
+- [ ] Loading / Error / Empty / Success states all handled in UI
+- [ ] `LaunchedEffect` / `.task {}` used for data loading (not `init` / `onAppear` directly)
+- [ ] One-shot events (navigation, snackbars) routed via `Channel` / closure callback — NOT via state
+- [ ] All UI text localised (`strings.xml` / `Localizable.strings`)
+- [ ] Accessibility labels set on all interactive elements (`contentDescription` / `accessibilityLabel`)
+- [ ] Dark mode tested (Material3 dynamic color / SwiftUI `colorScheme`)
+- [ ] Unit tests: ViewModel logic tested with `Turbine` (Android) or `XCTest async` (iOS)
+- [ ] UI tests: Compose `createComposeRule()` / SwiftUI `ViewInspector` for critical flows
+- [ ] Secrets stored in Keychain (iOS) / EncryptedSharedPreferences or Keystore (Android)
+- [ ] No `git push` executed — remote push is human's decision
+- [ ] `make check` passes before declaring task done
+
+---
+
+## MCP Integration
+
+When operating within the spex agent framework, follow the MCP state protocol in `references/mcp-protocol.md` for: state check, reading slice specs, registering artifacts, and emitting the handoff envelope.
