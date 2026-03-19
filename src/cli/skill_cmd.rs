@@ -35,10 +35,7 @@ pub fn cmd_skill_list() -> Result<()> {
     let agents_dir = opencode_dir.join("agents");
 
     if !agents_dir.exists() {
-        println!(
-            "{} No agents installed. Run `spex setup`.",
-            "ℹ".blue()
-        );
+        println!("{} No agents installed. Run `spex setup`.", "ℹ".blue());
         return Ok(());
     }
 

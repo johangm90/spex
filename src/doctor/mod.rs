@@ -128,10 +128,7 @@ fn check_skills_dir() -> CheckResult {
         CheckResult {
             name: "Agents dir".to_string(),
             status: CheckStatus::Warn,
-            message: format!(
-                "{} not found. Run `spex setup`.",
-                agents_dir.display()
-            ),
+            message: format!("{} not found. Run `spex setup`.", agents_dir.display()),
         }
     }
 }
@@ -159,9 +156,7 @@ fn check_skills_installed() -> CheckResult {
         }
         Ok(entries) => entries
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path().extension().and_then(|s| s.to_str()) == Some("md")
-            })
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("md"))
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect(),
     };
