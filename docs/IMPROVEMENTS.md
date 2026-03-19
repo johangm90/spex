@@ -6,104 +6,102 @@ This document is the prioritised improvement backlog for the `spex` CLI tool. It
 
 | ID | Title | Priority | Effort | Location |
 |----|-------|----------|--------|----------|
-| IMP-001 | `law freeze` is a no-op | P0 | S | `src/cli/law.rs` |
-| IMP-002 | `--yes` flag silently ignored in `spex new` | P0 | S | `src/scaffold/mod.rs` |
-| IMP-003 | No automated tests | P1 | L | project-wide |
-| IMP-004 | No CI/CD pipeline | P1 | M | `.github/workflows/` |
-| IMP-005 | `doctor --fix` is a stub | P1 | M | `src/doctor/mod.rs` |
-| IMP-006 | No CHANGELOG / CONTRIBUTING | P1 | S | project root |
-| IMP-007 | `memory_get_all` ignores `spec` scope | P1 | S | `src/mcp/server.rs` |
+| IMP-001 | Historical: `law freeze` issue from earlier CLI shape | P0 | S | obsolete (`src/cli/law.rs` removed) |
+| IMP-002 | Completed: `--yes` now works in `spex new` | P0 | S | `src/scaffold/mod.rs` |
+| IMP-003 | Automated tests exist, but coverage is still thin | P1 | L | project-wide |
+| IMP-004 | Historical: CI/release workflows now exist | P1 | M | `.github/workflows/` |
+| IMP-005 | Completed: `doctor --fix` now performs basic auto-fixes | P1 | M | `src/doctor/mod.rs` |
+| IMP-006 | Completed: CONTRIBUTING guide exists | P1 | S | `CONTRIBUTING.md` |
+| IMP-007 | Completed: `memory_get_all` respects `spec` scope | P1 | S | `src/sdd/memory.rs` |
 | IMP-008 | MCP tool proliferation (27 aliases) | P2 | M | `src/mcp/server.rs` |
-| IMP-009 | No pagination on list commands | P2 | M | `src/sdd/*.rs` |
-| IMP-010 | Spec lifecycle transitions not enforced | P2 | M | `src/sdd/spec.rs` |
-| IMP-011 | `spex pulse` has no time-range filter | P2 | S | `src/cli/pulse.rs` |
-| IMP-012 | No structured logging / tracing | P2 | M | project-wide |
-| IMP-013 | Binary size not optimised | P3 | S | `Cargo.toml` |
-| IMP-014 | `spex doctor` checks are hard-coded strings | P3 | S | `src/doctor/mod.rs` |
+| IMP-009 | Pagination is still incomplete across CLI list views | P2 | M | `src/sdd/*.rs` |
+| IMP-011 | Completed: `spex pulse` supports time-range filters | P2 | S | `src/cli/pulse.rs` |
+| IMP-012 | Structured logging exists, but adoption is partial | P2 | M | project-wide |
+| IMP-013 | Completed: release profile is tuned for smaller binaries | P3 | S | `Cargo.toml` |
+| IMP-014 | `spex doctor` checks are still hard-coded in one module | P3 | S | `src/doctor/mod.rs` |
 | IMP-015 | No shell completion generation | P3 | S | `src/main.rs` |
-| IMP-016 | SQLite WAL mode not enabled | P3 | S | `src/sdd/db.rs` |
 
 ---
 
-## IMP-001 — `law freeze` is a no-op (Priority: P0)
+## IMP-001 — Historical: `law freeze` issue from earlier CLI shape (Priority: P0)
 
-**Problem:** `spex law freeze` sets the constitution status to `"frozen"` in the DB, but `cmd_law_edit` never checks this flag — it always overwrites the constitution regardless of frozen state. This means the freeze command provides a false sense of immutability.
+**Status:** Obsolete. The current CLI no longer has `src/cli/law.rs` or a `spex law freeze` command in this form, so this backlog item no longer reflects the current repository state.
 
-**Location:** `src/cli/law.rs` — `cmd_law_edit` function
+**Location:** historical reference only
 
-**Proposed Solution:** At the start of `cmd_law_edit`, query the DB for the current constitution status. If `status == "frozen"`, print an error `"Constitution is frozen. Use 'spex law unfreeze' to make changes."` and return early with a non-zero exit code.
+**Note:** Keep this ID only as a historical note in case constitution freezing returns in a future CLI redesign.
 
 **Effort:** S
 
 ---
 
-## IMP-002 — `--yes` flag silently ignored in `spex new` (Priority: P0)
+## IMP-002 — Completed: `--yes` now works in `spex new` (Priority: P0)
 
-**Problem:** The `spex new --yes` flag (meant to skip interactive prompts) is accepted by the CLI parser but the parameter is named `_yes` and never read. Users who pass `--yes` in scripts still get interactive prompts, breaking automation.
+**Status:** Completed. The CLI now uses `yes: bool`, and `src/scaffold/mod.rs` skips the confirmation prompt when `yes` is set.
 
-**Location:** `src/scaffold/mod.rs` — `cmd_new` function signature uses `_yes: bool`
+**Location:** `src/scaffold/mod.rs`
 
-**Proposed Solution:** Rename `_yes` to `yes`, and branch on its value: if `yes == true`, skip all `Confirm::new(...).interact()` calls and apply defaults directly.
+**Note:** Kept here as a closed item because it was previously a real automation bug.
 
 **Effort:** S
 
 ---
 
-## IMP-003 — No automated tests (Priority: P1)
+## IMP-003 — Automated tests exist, but coverage is still thin (Priority: P1)
 
-**Problem:** The project has zero unit, integration, or doc tests. Only `tempfile` is listed as a dev-dependency but is never used. This means regressions can ship silently.
+**Problem:** The repository now has automated CLI tests in `tests/cli_tests.rs`, so the project no longer has zero tests. However, coverage is still light and remains concentrated in a few end-to-end paths.
 
 **Location:** `project-wide`
 
-**Proposed Solution:** Add unit tests for each SDD domain module (`spec.rs`, `task.rs`, `memory.rs`, `artifact.rs`), using an in-memory SQLite DB (`sqlite::memory:`). Add integration tests in `tests/` that spin up `spex new` in a temp dir and assert CLI output. Target ≥ 60% line coverage.
+**Proposed Solution:** Expand beyond the current CLI smoke tests with focused unit and integration coverage for the SDD and MCP layers, especially around state queries, filtering, and regression-prone command behavior.
 
 **Effort:** L
 
 ---
 
-## IMP-004 — No CI/CD pipeline (Priority: P1)
+## IMP-004 — Historical: CI/release workflows now exist (Priority: P1)
 
-**Problem:** There is no `.github/workflows/` directory. No automated build, test, lint, or release pipeline exists. Contributions can break the build without detection.
+**Status:** Obsolete as written. The repository now has `.github/workflows/ci.yml` and `.github/workflows/release.yml`.
 
-**Location:** `.github/workflows/` (does not exist)
+**Location:** `.github/workflows/`
 
-**Proposed Solution:** Create `.github/workflows/ci.yml` with jobs: `fmt` (`cargo fmt --check`), `clippy` (`cargo clippy -- -D warnings`), `test` (`cargo test`), `build` (matrix: ubuntu/macos/windows). Add a `release.yml` that publishes to crates.io on tag push.
+**Note:** If pipeline coverage needs further work later, create a fresh item that describes the remaining gap rather than preserving this now-inaccurate claim.
 
 **Effort:** M
 
 ---
 
-## IMP-005 — `doctor --fix` is a stub (Priority: P1)
+## IMP-005 — Completed: `doctor --fix` now performs basic auto-fixes (Priority: P1)
 
-**Problem:** `spex doctor --fix` prints `"Auto-fix not yet implemented"` and exits. The flag is advertised in help text but does nothing, eroding user trust.
+**Status:** Completed. `spex doctor --fix` now attempts several concrete remediations, including creating missing project files and installing bundled skills when appropriate.
 
 **Location:** `src/doctor/mod.rs` — `cmd_doctor` function
 
-**Proposed Solution:** Implement auto-fix for at least the automatable checks: (1) create missing `.spex/` directory, (2) run `spex init` if no DB found, (3) run `spex skills install` if agent skills are out of date. Checks that require human judgment (e.g. "MCP configured?") should print actionable instructions instead of silently passing.
+**Note:** Keep this as a closed historical item rather than an active backlog entry.
 
 **Effort:** M
 
 ---
 
-## IMP-006 — No CHANGELOG / CONTRIBUTING (Priority: P1)
+## IMP-006 — Completed: CONTRIBUTING guide exists (Priority: P1)
 
-**Problem:** The project has no `CHANGELOG.md` or `CONTRIBUTING.md`. Contributors have no guidance on how to contribute, and users cannot track what changed between releases.
+**Status:** Completed. `CONTRIBUTING.md` exists at the repository root and covers workflow, commit conventions, tests, and development setup.
 
-**Location:** `project root`
+**Location:** `CONTRIBUTING.md`
 
-**Proposed Solution:** Create `CHANGELOG.md` following Keep a Changelog format (https://keepachangelog.com). Create `CONTRIBUTING.md` covering: fork-and-PR workflow, commit message convention (Conventional Commits), running tests, and the agent skill development guide.
+**Note:** Kept for historical traceability only.
 
 **Effort:** S
 
 ---
 
-## IMP-007 — `memory_get_all` ignores `spec` scope (Priority: P1)
+## IMP-007 — Completed: `memory_get_all` respects `spec` scope (Priority: P1)
 
-**Problem:** When an MCP client calls `state_memory_get` without a `key` (intending to list all memory for a spec), the server's handler drops the `spec` parameter from the SQL query. This returns memory entries across all specs, causing cross-spec contamination and leaking data between agent sessions.
+**Status:** Completed. `memory_get_all` now branches on `spec` and applies the scoped SQL query when a spec is provided.
 
-**Location:** `src/mcp/server.rs` — `memory_get` handler, `all_entries` branch
+**Location:** `src/sdd/memory.rs`
 
-**Proposed Solution:** In the `all_entries` branch, pass the `spec` parameter into the SQL query: `SELECT * FROM memory WHERE agent = ? AND (spec = ? OR spec IS NULL)`. Add a test asserting spec isolation.
+**Note:** Keep as a closed item because it was a real correctness issue.
 
 **Effort:** S
 
@@ -121,9 +119,9 @@ This document is the prioritised improvement backlog for the `spex` CLI tool. It
 
 ---
 
-## IMP-009 — No pagination on list commands (Priority: P2)
+## IMP-009 — Pagination is still incomplete across CLI list views (Priority: P2)
 
-**Problem:** `spex spec list`, `spex task list`, `spex trace`, and `spex pulse` fetch all rows from SQLite without any LIMIT/OFFSET. In projects with hundreds of specs or thousands of events, this will produce unusable terminal output and slow queries.
+**Problem:** This is no longer universally true: the SDD/event layers support `LIMIT/OFFSET`, `spex trace` already has a `--limit`, and `spex pulse` supports time filtering. The remaining gap is that `spex spec list` and `spex task list` still do not expose pagination controls in the CLI.
 
 **Location:** `src/sdd/spec.rs`, `src/sdd/task.rs`, `src/sdd/event.rs`
 
@@ -133,66 +131,45 @@ This document is the prioritised improvement backlog for the `spex` CLI tool. It
 
 ---
 
-## IMP-010 — Spec lifecycle transitions not enforced (Priority: P2)
+## IMP-011 — Completed: `spex pulse` supports time-range filters (Priority: P2)
 
-**Problem:** `spex spec update --status` accepts any string value and writes it directly to the DB. There is no validation that transitions follow the defined lifecycle (`draft → approved → in_progress ⇄ paused → done`). An agent can set a spec from `draft` directly to `done`, skipping required gates.
-
-**Location:** `src/sdd/spec.rs` — `update_spec` function
-
-**Proposed Solution:** Define a `SpecStatus` enum with valid transition rules. In `update_spec`, reject invalid transitions with a descriptive error (e.g. `"Cannot transition from 'draft' to 'done'; must pass through 'approved' and 'in_progress' first"`). Expose an `--force` flag for human overrides.
-
-**Effort:** M
-
----
-
-## IMP-011 — `spex pulse` has no time-range filter (Priority: P2)
-
-**Problem:** `spex pulse` shows recent events but provides no way to filter by time range. Users cannot narrow output to "events from the last hour" or "events since yesterday".
+**Status:** Completed. The CLI now exposes `--since` and `--until` on `spex pulse`, and the event query layer supports both filters.
 
 **Location:** `src/cli/pulse.rs`
 
-**Proposed Solution:** Add `--since <datetime|duration>` and `--until <datetime>` flags. Support ISO 8601 timestamps and human durations like `1h`, `2d`. Thread into the SQL query as `WHERE timestamp >= ?`.
+**Note:** Kept as a closed item for historical context.
 
 **Effort:** S
 
 ---
 
-## IMP-012 — No structured logging / tracing (Priority: P2)
+## IMP-012 — Structured logging exists, but adoption is partial (Priority: P2)
 
-**Problem:** The application uses `eprintln!` and `println!` for all output. There is no structured logging, no log levels, and no way to enable debug output for troubleshooting. This makes diagnosing MCP server issues nearly impossible.
+**Problem:** The project now initializes `tracing_subscriber` and uses `tracing` in the MCP server, so the repository no longer lacks structured logging entirely. The remaining gap is inconsistent adoption across the rest of the codebase.
 
 **Location:** `project-wide`
 
-**Proposed Solution:** Add `tracing` and `tracing-subscriber` crates. Replace `eprintln!` debug output with `tracing::debug!` / `tracing::error!`. Respect `RUST_LOG` env var. In MCP stdio mode, ensure logs go to stderr only (not stdout, which is reserved for JSON-RPC).
+**Proposed Solution:** Continue migrating internal diagnostics to `tracing` where structured logs add value, while keeping normal user-facing CLI output on stdout/stderr as appropriate.
 
 **Effort:** M
 
 ---
 
-## IMP-013 — Binary size not optimised (Priority: P3)
+## IMP-013 — Completed: release profile is tuned for smaller binaries (Priority: P3)
 
-**Problem:** `Cargo.toml` has no release profile tuning. The binary includes debug symbols and is not stripped, resulting in a larger-than-necessary binary (estimated 15–25 MB unstripped).
+**Status:** Completed. `Cargo.toml` now defines a release profile with `opt-level = "z"`, `lto = true`, `codegen-units = 1`, `strip = true`, and `panic = "abort"`.
 
 **Location:** `Cargo.toml`
 
-**Proposed Solution:** Add to `Cargo.toml`:
-
-```toml
-[profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-strip = true
-panic = "abort"
-```
+**Note:** Keep as a closed historical item only.
 
 **Effort:** S
 
 ---
 
-## IMP-014 — `spex doctor` checks are hard-coded strings (Priority: P3)
+## IMP-014 — `spex doctor` checks are still hard-coded in one module (Priority: P3)
 
-**Problem:** The 7 doctor checks are implemented as a hard-coded `Vec<(&str, bool, &str)>` of `(name, passed, message)` tuples. Adding a new check requires editing the core function rather than registering a new check, making the system brittle.
+**Problem:** The exact tuple-based implementation is gone, but the checks are still hard-coded as a fixed set of functions inside `src/doctor/mod.rs`. Adding or extending checks still requires editing the core module directly.
 
 **Location:** `src/doctor/mod.rs`
 
@@ -209,18 +186,6 @@ panic = "abort"
 **Location:** `src/main.rs` / `build.rs`
 
 **Proposed Solution:** Use `clap_complete` crate to generate completion scripts at build time (in `build.rs`) and install them via `spex skills install` or as a separate `spex completions <shell>` subcommand.
-
-**Effort:** S
-
----
-
-## IMP-016 — SQLite WAL mode not enabled (Priority: P3)
-
-**Problem:** SQLite defaults to DELETE journal mode. In WAL (Write-Ahead Logging) mode, reads don't block writes and writes don't block reads, which is important for the MCP server which may receive concurrent tool calls.
-
-**Location:** `src/sdd/db.rs` — `init_db` function
-
-**Proposed Solution:** After opening the connection pool, execute `PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`. This is a one-line change with measurable concurrency benefits.
 
 **Effort:** S
 

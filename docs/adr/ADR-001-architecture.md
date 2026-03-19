@@ -8,12 +8,12 @@ Deciders: core team
 
 ## Context and Problem Statement
 
-`spex` is a Spec-Driven Development (SDD) command-line tool. It serves two primary audiences:
+`spex` is a command-line tool for spec-driven coordination in AI-assisted software delivery. It serves two primary audiences:
 
 1. **Human engineers** — who use the CLI to manage project specs, tasks, events, and agent memory across a team.
 2. **LLM agents** (running inside OpenCode) — which call `spex` as an MCP server to read and mutate shared project state without leaving their execution environment.
 
-The tool must work completely offline, install as a single binary with no external dependencies, and integrate seamlessly with OpenCode's MCP client protocol. This document records the significant architectural decisions made during the v0.1.0 design phase.
+The tool must work completely offline, install as a single binary with no external dependencies, and integrate seamlessly with OpenCode's MCP client protocol. This document records the significant architectural decisions made during the early product design phase.
 
 ---
 
@@ -53,8 +53,7 @@ The schema currently comprises seven tables: `constitution`, `specs`, `tasks`, `
 - ✅ Works completely offline; zero external infrastructure.
 - ✅ State travels with the repo — a `git clone` restores history.
 - ✅ SQL queries are compile-time checked (`DATABASE_URL` must be set during `cargo build`).
-- ⚠️ Concurrent write throughput is limited by SQLite's single-writer model.
-- ⚠️ WAL mode is not yet enabled; high-frequency agent writes may cause lock contention. See **IMP-016** in `docs/IMPROVEMENTS.md`.
+- ⚠️ Concurrent write throughput is still limited by SQLite's single-writer model, even with WAL mode enabled.
 
 ---
 
@@ -75,7 +74,7 @@ The schema currently comprises seven tables: `constitution`, `specs`, `tasks`, `
 
 OpenCode's MCP client natively supports the stdio transport. Launching `spex mcp serve` as a child process avoids port-allocation conflicts, removes the need for TLS or authentication, and keeps the tool stateless between MCP sessions (state lives in SQLite, not in process memory).
 
-The MCP server dispatches **14 canonical tools** (`state_snapshot`, `spec_get`, `spec_create`, `spec_update`, `task_get`, `task_create`, `task_update`, `event_emit`, `event_query`, `memory_set`, `memory_get`, `artifact_register`, `artifact_query`, `constitution_get`), plus **13 legacy alias entries** bringing the total registered count to 27. Aliases allow agents that were trained on earlier `slice_*` or `spec_*` prefixes to continue working without changes. See **IMP-008** in `docs/IMPROVEMENTS.md` for the technical debt note on eventual alias retirement.
+The MCP server dispatches a canonical state-oriented tool set for snapshot, spec, task, event, memory, artifact, and PRD access, plus legacy alias entries for older naming schemes. Aliases allow agents that were trained on earlier `slice_*`, `spec_*`, or `constitution_*` names to continue working without changes. See **IMP-008** in `docs/IMPROVEMENTS.md` for the technical debt note on eventual alias retirement.
 
 #### Consequences
 
@@ -93,7 +92,7 @@ The MCP server dispatches **14 canonical tools** (`state_snapshot`, `spec_get`, 
 
 | Option | Description |
 |--------|-------------|
-| **`include_dir!` at build time (chosen)** | Skills compiled into the binary; `spex skills install` extracts them |
+| **`include_dir!` at build time (chosen)** | Skills compiled into the binary; `spex setup` extracts them |
 | Downloaded at install time | Installer script fetches skills from a URL at `spex init` |
 | Git submodule | Skills live in a submodule; user must init submodules after clone |
 | Separate package | Skills distributed as an independent npm/crate/pip package |
@@ -102,14 +101,14 @@ The MCP server dispatches **14 canonical tools** (`state_snapshot`, `spec_get`, 
 
 **`include_dir!` macro** (from the `include_dir` crate), evaluated at compile time.
 
-Sixteen agent skill directories plus shared resources are embedded directly into the `spex` binary. The `build.rs` build script verifies the assets directory exists at compile time so a broken asset path fails the build rather than producing a silent runtime error. When the user runs `spex skills install`, the embedded tree is extracted to `~/.config/opencode/skills/`.
+Eleven bundled agent skill directories plus shared resources are embedded directly into the `spex` binary. The `build.rs` build script verifies the assets directory exists at compile time so a broken asset path fails the build rather than producing a silent runtime error. When the user runs `spex setup`, the embedded tree is extracted to `~/.config/opencode/skills/`.
 
 #### Consequences
 
 - ✅ Offline installation — no internet access required after `cargo install spex`.
 - ✅ Skills are always version-locked to the binary; no drift between tool behaviour and agent prompts.
 - ✅ Single binary distribution; no sidecar files.
-- ⚠️ Binary size increases with every new skill (currently ~16 skill directories).
+- ⚠️ Binary size increases with every new skill (currently 11 bundled skill directories).
 - ⚠️ Updating a skill requires a new binary release; there is no hot-reload path.
 
 ---
@@ -174,7 +173,7 @@ The `sqlx::migrate!` macro also runs pending migrations at application startup, 
 
 | Option | Description |
 |--------|-------------|
-| **Defined state machine (chosen, partially implemented)** | Fixed status values with transition rules |
+| **Defined state machine (chosen)** | Fixed status values with transition rules |
 | Free-form status strings | Any string accepted; no enforcement |
 | Event-sourced lifecycle | Status derived from event log; no `status` column |
 
@@ -186,16 +185,14 @@ Specs follow a defined lifecycle:
 draft → approved → in_progress ⇄ paused → done
 ```
 
-Status values are stored in the `specs.status` column. The CLI and MCP tools accept status strings and write them to the database.
-
-**Current state:** transition rules are documented but **not yet enforced in code** — invalid transitions (e.g. `done → in_progress`) are not rejected by the API layer. This is tracked as **IMP-010** in `docs/IMPROVEMENTS.md`. Enforcement will be added in a future release via a guard function in the `spec_update` handler.
+Status values are stored in the `specs.status` column, and transitions are validated against the defined lifecycle before updates are persisted.
 
 #### Consequences
 
 - ✅ Status values are well-defined and visible to agents via `state_snapshot`.
 - ✅ The lifecycle model provides a shared vocabulary for orchestrator agents.
-- ⚠️ Without enforcement (IMP-010), agents can transition specs to any status string; data integrity relies on agent discipline.
-- ⚠️ The `paused` ⇄ `in_progress` bi-directional edge is not yet tested.
+- ✅ Invalid transitions are rejected before they reach persistent state.
+- ⚠️ Any future lifecycle expansion still requires coordinated updates across CLI, MCP schemas, and validation logic.
 
 ---
 
@@ -269,7 +266,5 @@ Additionally, MCP `memory` entries include an optional `spec` scope field. Scopi
 |----|---------|
 | IMP-007 | Memory scope isolation — enforce `spec` field as a read boundary |
 | IMP-008 | Retire legacy MCP tool alias prefixes after agent retraining |
-| IMP-010 | Enforce spec lifecycle state machine transitions in `spec_update` handler |
-| IMP-016 | Enable SQLite WAL mode to reduce write-lock contention |
 
 All items are tracked in `docs/IMPROVEMENTS.md`.

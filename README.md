@@ -1,7 +1,7 @@
 # spex
 
-> **Spec-Driven Development for AI-assisted teams.**  
-> Define specs, coordinate agents, track progress — all from your terminal.
+> **Spec-driven coordination for AI-assisted software delivery.**  
+> Define work, share state, coordinate specialist agents, and track progress from your terminal.
 
 [![CI](https://github.com/johangm90/spex/actions/workflows/ci.yml/badge.svg)](https://github.com/johangm90/spex/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/johangm90/spex?style=flat-square)](https://github.com/johangm90/spex/releases/latest)
@@ -12,11 +12,11 @@
 
 ## What is spex?
 
-`spex` is a single Rust binary that gives developers and AI agents a **shared, persistent state store** for coordinating feature delivery.
+`spex` is a single Rust binary that gives developers and AI agents a **shared, persistent state layer** for coordinating software delivery.
 
 - **Specs** are the unit of work — named feature slices with a human-gated lifecycle (`draft → approved → in_progress → done`).
 - **Agents** share state through an embedded **MCP (Model Context Protocol)** server backed by a local SQLite database at `.spex/state.db`.
-- **10 bundled AI agent skills** (`spex-architect`, `spex-orchestrate`, `spex-backend`, `spex-frontend`, `spex-qa`, `spex-db`, `spex-devops`, `spex-gitops`, `spex-mobile`, `spex-ai-eng`) install in one command and work with [OpenCode](https://opencode.ai) out of the box.
+- **11 bundled AI agent skills** (`spex-architect`, `spex-orchestrate`, `spex-explore`, `spex-backend`, `spex-frontend`, `spex-qa`, `spex-db`, `spex-devops`, `spex-gitops`, `spex-mobile`, `spex-ai-eng`) install in one command and work with [OpenCode](https://opencode.ai) out of the box.
 
 ---
 
@@ -53,7 +53,7 @@ cargo install --path .
 spex new my-project
 cd my-project
 
-# 2. Install the 10 bundled agent skills into OpenCode
+# 2. Install the 11 bundled agent skills into OpenCode
 spex setup
 
 # 3. Add and approve a spec
@@ -111,15 +111,16 @@ Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 
 | Agent | Role |
 |-------|------|
-| `spex-architect` | PRD, ADRs, slice specs, product discovery |
-| `spex-orchestrate` | Decomposes specs, delegates tasks, gates progress |
+| `spex-architect` | PRD, ADRs, bounded contexts, slice specs |
+| `spex-orchestrate` | Classifies requests, delegates specialists, coordinates gates |
+| `spex-explore` | Codebase exploration, dependency tracing, bug and incident discovery |
 | `spex-backend` | Server-side code, APIs, business logic |
 | `spex-frontend` | Web UI, design tokens, components |
-| `spex-mobile` | React Native / Flutter apps |
+| `spex-mobile` | Native Android, iOS, and KMP / CMP delivery |
 | `spex-db` | Schema design, migrations |
 | `spex-devops` | CI/CD, containers, infra |
 | `spex-qa` | Tests, code reviews, security reviews, acceptance gates |
-| `spex-gitops` | Commits, branches, PRs, CHANGELOG |
+| `spex-gitops` | Commits, branches, PRs, release hygiene |
 | `spex-ai-eng` | LLM integration, RAG, prompt engineering |
 
 ---
@@ -129,6 +130,8 @@ Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 ```sh
 git clone https://github.com/johangm90/spex.git
 cd spex
+
+# Project-appropriate validation for this Rust repo
 cargo build
 cargo test
 cargo clippy -- -D warnings
