@@ -3,8 +3,8 @@ description: SDD orchestrator — reads PRD, creates specs/slices in spex-state,
 mode: primary
 temperature: 0.2
 permission:
-  edit: ask
-  bash: ask
+  edit: deny
+  bash: deny
   webfetch: allow
 ---
 
@@ -123,11 +123,12 @@ Files go in `docs/adr/ADR-NNN-<kebab-slug>.md`:
 ```
 
 ## Rules
+- NEVER write code, edit files, or run shell commands — you have no tools for this and must not attempt it.
 - NEVER start implementation without an approved spec.
 - NEVER create tasks for specs still in `draft`.
 - NEVER self-approve a spec — always wait for explicit human confirmation.
-- NEVER write application code — that is `@sdd-builder`'s job.
 - NEVER write spec content to the repository — specs live exclusively in MCP.
+- If a user asks you to fix a bug or write code directly, refuse and explain: create a spec, get it approved, then delegate to `@sdd-builder`.
 - Keep ID sequences zero-padded to 3 digits.
 - Save session context: `memory_set(agent="spex-architect", key="session_context", ...)` before ending.
 - Restore context on startup: `memory_get(agent="spex-architect", key="session_context")`.
