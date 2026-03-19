@@ -1,36 +1,26 @@
 use anyhow::Result;
 use colored::Colorize;
 
-use crate::skills_mgr::{install_bundled_agents, install_bundled_skills, list_installed_skills};
+use crate::skills_mgr::install_bundled_agents;
 
 pub async fn cmd_skill_install(all: bool) -> Result<()> {
     if !all {
         println!(
             "{}",
-            "Use `spex skill install --all` to install all bundled skills.".dimmed()
+            "Use `spex skill install --all` to install all bundled agents.".dimmed()
         );
         return Ok(());
     }
 
     let opencode_dir = crate::cli::util::opencode_config_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
-    let skills_dir = opencode_dir.join("skills");
     let agents_dir = opencode_dir.join("agents");
 
-    std::fs::create_dir_all(&skills_dir)?;
     std::fs::create_dir_all(&agents_dir)?;
-
-    let skill_count = install_bundled_skills(&skills_dir)?;
-    println!(
-        "{} Installed {} skill files to {}",
-        "✓".green(),
-        skill_count,
-        skills_dir.display()
-    );
 
     let agent_count = install_bundled_agents(&agents_dir)?;
     println!(
-        "{} Installed {} agent files to {}",
+        "{} Installed {} agent file(s) to {}",
         "✓".green(),
         agent_count,
         agents_dir.display()
@@ -42,57 +32,53 @@ pub async fn cmd_skill_install(all: bool) -> Result<()> {
 pub fn cmd_skill_list() -> Result<()> {
     let opencode_dir = crate::cli::util::opencode_config_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
-    let skills_dir = opencode_dir.join("skills");
+    let agents_dir = opencode_dir.join("agents");
 
-    if !skills_dir.exists() {
+    if !agents_dir.exists() {
         println!(
-            "{} No skills installed. Run `spex skill install --all`.",
+            "{} No agents installed. Run `spex setup`.",
             "ℹ".blue()
         );
         return Ok(());
     }
 
-    let skills = list_installed_skills(&skills_dir)?;
-    if skills.is_empty() {
+    let mut agents: Vec<String> = std::fs::read_dir(&agents_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("md"))
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    agents.sort();
+
+    if agents.is_empty() {
         println!(
-            "{} No spex skills found in {}.",
+            "{} No agent .md files found in {}.",
             "ℹ".blue(),
-            skills_dir.display()
+            agents_dir.display()
         );
     } else {
-        println!("{}", "Installed skills:".bold());
-        for skill in &skills {
-            println!("  {} {}", "•".cyan(), skill);
+        println!("{}", "Installed agents:".bold());
+        for agent in &agents {
+            println!("  {} {}", "•".cyan(), agent);
         }
     }
     Ok(())
 }
 
-/// One-time global setup: install skills + agents, then write MCP config.
+/// One-time global setup: install agents, then write MCP config.
 pub async fn cmd_setup(global: bool) -> Result<()> {
     println!("{}", "Running one-time spex setup…".bold());
     println!();
 
-    // Step 1: Install bundled skills and agents
+    // Step 1: Install bundled agents
     let opencode_dir = crate::cli::util::opencode_config_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
-    let skills_dir = opencode_dir.join("skills");
     let agents_dir = opencode_dir.join("agents");
 
-    std::fs::create_dir_all(&skills_dir)?;
     std::fs::create_dir_all(&agents_dir)?;
-
-    let skill_count = install_bundled_skills(&skills_dir)?;
-    println!(
-        "  {} Installed {} skill files → {}",
-        "✓".green(),
-        skill_count,
-        skills_dir.display()
-    );
 
     let agent_count = install_bundled_agents(&agents_dir)?;
     println!(
-        "  {} Installed {} agent files → {}",
+        "  {} Installed {} agent file(s) → {}",
         "✓".green(),
         agent_count,
         agents_dir.display()

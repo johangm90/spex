@@ -6,7 +6,7 @@ use sqlx::SqlitePool;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Artifact {
     pub id: String,
-    pub spec: String,
+    pub spec: Option<String>,
     pub task: Option<String>,
     pub agent: String,
     pub r#type: String,
@@ -19,7 +19,7 @@ pub struct Artifact {
 pub async fn register_artifact(
     pool: &SqlitePool,
     id: &str,
-    spec: &str,
+    spec: Option<&str>,
     task: Option<&str>,
     agent: &str,
     artifact_type: &str,
@@ -42,7 +42,7 @@ pub async fn register_artifact(
     .execute(pool)
     .await?;
 
-    query_artifacts(pool, Some(spec), task, Some(agent), None)
+    query_artifacts(pool, spec, task, Some(agent), None)
         .await?
         .into_iter()
         .find(|a| a.id == id)
@@ -78,7 +78,7 @@ pub async fn query_artifacts(
         _,
         (
             String,
-            String,
+            Option<String>,
             Option<String>,
             String,
             String,

@@ -208,7 +208,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(payload)
         }
 
-        "spec_get" | "state_spec_get" | "slice_get" | "state_slice_get" => {
+        "state_slice_get" => {
             let id = args.get("id").and_then(|v| v.as_str());
             if let Some(id) = id {
                 let spec = get_spec(pool, id).await?;
@@ -219,7 +219,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             }
         }
 
-        "spec_create" | "state_spec_create" | "slice_create" | "state_slice_create" => {
+        "state_slice_create" => {
             let id = args
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -256,7 +256,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(spec))
         }
 
-        "spec_update" | "state_spec_update" | "slice_update" | "state_slice_update" => {
+        "state_slice_update" => {
             let id = args
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -295,7 +295,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(spec))
         }
 
-        "task_get" | "state_task_get" => {
+        "state_task_get" => {
             let id = args.get("id").and_then(|v| v.as_str());
             let spec = args.get("spec").and_then(|v| v.as_str());
 
@@ -308,7 +308,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             }
         }
 
-        "task_create" | "state_task_create" => {
+        "state_task_create" => {
             let id = args
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -340,7 +340,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(task))
         }
 
-        "task_update" | "state_task_update" => {
+        "state_task_update" => {
             let id = args
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -360,7 +360,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(task))
         }
 
-        "event_emit" | "state_event_emit" => {
+        "state_event_emit" => {
             let event_type = args
                 .get("type")
                 .and_then(|v| v.as_str())
@@ -376,7 +376,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!({"ok": true}))
         }
 
-        "event_query" | "state_event_query" => {
+        "state_event_query" => {
             let type_filter = args.get("type").and_then(|v| v.as_str());
             let spec_filter = args.get("spec").and_then(|v| v.as_str());
             let agent_filter = args.get("agent").and_then(|v| v.as_str());
@@ -452,15 +452,12 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             }
         }
 
-        "artifact_register" => {
+        "state_artifact_register" => {
             let id = args
                 .get("id")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
-            let spec = args
-                .get("spec")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing field: spec"))?;
+            let spec = args.get("spec").and_then(|v| v.as_str());
             let agent = args
                 .get("agent")
                 .and_then(|v| v.as_str())
@@ -487,7 +484,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(artifact))
         }
 
-        "artifact_query" => {
+        "state_artifact_query" => {
             let spec = args.get("spec").and_then(|v| v.as_str());
             let task = args.get("task").and_then(|v| v.as_str());
             let agent = args.get("agent").and_then(|v| v.as_str());
@@ -497,7 +494,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(artifacts))
         }
 
-        "constitution_get" | "state_constitution_get" | "prd_get" | "state_prd_get" => {
+        "state_prd_get" => {
             // Read docs/PRD.md (source of truth is the file, not the DB)
             let project_dir = detect_project_dir();
             let prd_path = std::path::Path::new(&project_dir)
@@ -592,7 +589,7 @@ fn build_tools_list() -> Value {
         },
         {
             "name": "state_slice_get",
-            "description": "Alias for spec_get. Get a specific slice/spec by ID, or list all.",
+            "description": "Get a specific slice/spec by ID, or list all.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -601,33 +598,8 @@ fn build_tools_list() -> Value {
             }
         },
         {
-            "name": "spec_get",
-            "description": "Legacy alias for state_slice_get.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string", "description": "Spec ID (optional; omit to list all)"}
-                }
-            }
-        },
-        {
             "name": "state_slice_create",
-            "description": "Alias for spec_create. Create a new slice/spec.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "title": {"type": "string"},
-                    "priority": {"type": "string", "enum": ["P0", "P1", "P2", "P3"]},
-                    "depends_on": {"type": "array", "items": {"type": "string"}},
-                    "agents": {"type": "array", "items": {"type": "string"}}
-                },
-                "required": ["id", "title"]
-            }
-        },
-        {
-            "name": "spec_create",
-            "description": "Legacy alias for state_slice_create.",
+            "description": "Create a new slice/spec.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -642,23 +614,7 @@ fn build_tools_list() -> Value {
         },
         {
             "name": "state_slice_update",
-            "description": "Alias for spec_update. Update slice/spec status, AC counts, or agents.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "status": {"type": "string"},
-                    "ac_total": {"type": "number"},
-                    "ac_passed": {"type": "number"},
-                    "agents": {"type": "array", "items": {"type": "string"}},
-                    "updated_by": {"type": "string"}
-                },
-                "required": ["id"]
-            }
-        },
-        {
-            "name": "spec_update",
-            "description": "Legacy alias for state_slice_update.",
+            "description": "Update slice/spec status, AC counts, or agents.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -674,18 +630,7 @@ fn build_tools_list() -> Value {
         },
         {
             "name": "state_task_get",
-            "description": "Alias for task_get. Get a task by ID, or list tasks (optionally filtered by spec).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "spec": {"type": "string"}
-                }
-            }
-        },
-        {
-            "name": "task_get",
-            "description": "Legacy alias for state_task_get.",
+            "description": "Get a task by ID, or list tasks (optionally filtered by spec).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -696,23 +641,7 @@ fn build_tools_list() -> Value {
         },
         {
             "name": "state_task_create",
-            "description": "Alias for task_create. Create a new task within a spec.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "spec": {"type": "string"},
-                    "title": {"type": "string"},
-                    "agent": {"type": "string"},
-                    "inputs": {"type": "array", "items": {"type": "string"}},
-                    "output_artifact": {"type": "string"}
-                },
-                "required": ["id", "spec", "title", "agent"]
-            }
-        },
-        {
-            "name": "task_create",
-            "description": "Legacy alias for state_task_create.",
+            "description": "Create a new task within a spec.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -728,20 +657,7 @@ fn build_tools_list() -> Value {
         },
         {
             "name": "state_task_update",
-            "description": "Alias for task_update. Update task status or output artifact.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "status": {"type": "string"},
-                    "output_artifact": {"type": "string"}
-                },
-                "required": ["id"]
-            }
-        },
-        {
-            "name": "task_update",
-            "description": "Legacy alias for state_task_update.",
+            "description": "Update task status or output artifact.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -754,21 +670,7 @@ fn build_tools_list() -> Value {
         },
         {
             "name": "state_event_emit",
-            "description": "Alias for event_emit. Emit a domain event to the event log.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "type": {"type": "string"},
-                    "spec": {"type": "string"},
-                    "agent": {"type": "string"},
-                    "payload": {"type": "object"}
-                },
-                "required": ["type"]
-            }
-        },
-        {
-            "name": "event_emit",
-            "description": "Legacy alias for state_event_emit.",
+            "description": "Emit a domain event to the event log.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -782,21 +684,7 @@ fn build_tools_list() -> Value {
         },
         {
             "name": "state_event_query",
-            "description": "Alias for event_query. Query the event log with optional filters.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "type": {"type": "string"},
-                    "spec": {"type": "string"},
-                    "agent": {"type": "string"},
-                    "limit": {"type": "number"},
-                    "since": {"type": "string"}
-                }
-            }
-        },
-        {
-            "name": "event_query",
-            "description": "Legacy alias for state_event_query.",
+            "description": "Query the event log with optional filters.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -838,24 +726,24 @@ fn build_tools_list() -> Value {
             }
         },
         {
-            "name": "artifact_register",
+            "name": "state_artifact_register",
             "description": "Register an output artifact produced by an agent.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "id": {"type": "string"},
-                    "spec": {"type": "string"},
+                    "spec": {"type": "string", "description": "Parent spec ID (optional for global/cross-spec artifacts such as registered agents)"},
                     "agent": {"type": "string"},
                     "type": {"type": "string"},
                     "task": {"type": "string"},
                     "path": {"type": "string"},
                     "description": {"type": "string"}
                 },
-                "required": ["id", "spec", "agent", "type"]
+                "required": ["id", "agent", "type"]
             }
         },
         {
-            "name": "artifact_query",
+            "name": "state_artifact_query",
             "description": "Query registered artifacts with optional filters.",
             "inputSchema": {
                 "type": "object",
@@ -870,22 +758,6 @@ fn build_tools_list() -> Value {
         {
             "name": "state_prd_get",
             "description": "Read PRD.md from the project root (at docs/PRD.md). Returns content, path, exists flag, and is_template flag (true if the file is still the default unfilled template).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "state_constitution_get",
-            "description": "Legacy alias for state_prd_get.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {}
-            }
-        },
-        {
-            "name": "constitution_get",
-            "description": "Legacy alias for state_prd_get.",
             "inputSchema": {
                 "type": "object",
                 "properties": {}

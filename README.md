@@ -16,7 +16,7 @@
 
 - **Specs** are the unit of work — named feature slices with a human-gated lifecycle (`draft → approved → in_progress → done`).
 - **Agents** share state through an embedded **MCP (Model Context Protocol)** server backed by a local SQLite database at `.spex/state.db`.
-- **11 bundled AI agent skills** (`spex-architect`, `spex-orchestrate`, `spex-explore`, `spex-backend`, `spex-frontend`, `spex-qa`, `spex-db`, `spex-devops`, `spex-gitops`, `spex-mobile`, `spex-ai-eng`) install in one command and work with [OpenCode](https://opencode.ai) out of the box.
+- **6 bundled AI agents** install in one command and work with [OpenCode](https://opencode.ai) out of the box. A single primary orchestrator (`spex-architect`) coordinates four focused subagents, plus a `skill-builder` that scaffolds custom agents for your team's stack.
 
 ---
 
@@ -53,7 +53,7 @@ cargo install --path .
 spex new my-project
 cd my-project
 
-# 2. Install the 11 bundled agent skills into OpenCode
+# 2. Install the 6 bundled agents into OpenCode
 spex setup
 
 # 3. Add and approve a spec
@@ -64,7 +64,7 @@ spex spec approve SPEC-001
 spex plan build SPEC-001
 
 # 5. Open OpenCode — the MCP server starts automatically
-#    Ask @spex-orchestrate to begin work on SPEC-001
+#    Ask @spex-architect to begin work on SPEC-001
 
 # 6. Monitor progress
 spex pulse
@@ -105,23 +105,20 @@ Run `spex <command> --help` for full flags and options.
 
 ---
 
-## Bundled Agent Skills
+## Bundled Agents
 
 Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 
-| Agent | Role |
-|-------|------|
-| `spex-architect` | PRD, ADRs, bounded contexts, slice specs |
-| `spex-orchestrate` | Classifies requests, delegates specialists, coordinates gates |
-| `spex-explore` | Codebase exploration, dependency tracing, bug and incident discovery |
-| `spex-backend` | Server-side code, APIs, business logic |
-| `spex-frontend` | Web UI, design tokens, components |
-| `spex-mobile` | Native Android, iOS, and KMP / CMP delivery |
-| `spex-db` | Schema design, migrations |
-| `spex-devops` | CI/CD, containers, infra |
-| `spex-qa` | Tests, code reviews, security reviews, acceptance gates |
-| `spex-gitops` | Commits, branches, PRs, release hygiene |
-| `spex-ai-eng` | LLM integration, RAG, prompt engineering |
+| Agent | Mode | Role |
+|-------|------|------|
+| `spex-architect` | primary | Orchestrates the full SDD workflow — reads the PRD, creates specs, coordinates subagents, gates implementation |
+| `spec-writer` | subagent | Drafts complete spec/slice documents with acceptance criteria and open questions |
+| `task-planner` | subagent | Decomposes approved specs into granular, independently verifiable tasks |
+| `adr-writer` | subagent | Captures architecture decisions in MADR format |
+| `sdd-builder` | subagent | Implements tasks from approved specs, runs tests, and marks tasks done |
+| `skill-builder` | subagent | Scaffolds custom spex-compatible agents for any team's tech stack |
+
+> **Need a specialist?** Ask `@spex-architect` to invoke `@skill-builder` and describe your stack. You'll get a custom agent tailored to your conventions in seconds.
 
 ---
 

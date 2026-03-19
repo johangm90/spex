@@ -115,47 +115,69 @@ fn check_prd() -> CheckResult {
 }
 
 fn check_skills_dir() -> CheckResult {
-    let skills_dir = crate::cli::util::opencode_config_dir()
+    let agents_dir = crate::cli::util::opencode_config_dir()
         .unwrap_or_default()
-        .join("skills");
-    if skills_dir.exists() {
+        .join("agents");
+    if agents_dir.exists() {
         CheckResult {
-            name: "Skills dir".to_string(),
+            name: "Agents dir".to_string(),
             status: CheckStatus::Pass,
-            message: format!("{}", skills_dir.display()),
+            message: format!("{}", agents_dir.display()),
         }
     } else {
         CheckResult {
-            name: "Skills dir".to_string(),
+            name: "Agents dir".to_string(),
             status: CheckStatus::Warn,
             message: format!(
-                "{} not found. Run `spex skill install --all`.",
-                skills_dir.display()
+                "{} not found. Run `spex setup`.",
+                agents_dir.display()
             ),
         }
     }
 }
 
 fn check_skills_installed() -> CheckResult {
-    let skills_dir = crate::cli::util::opencode_config_dir()
+    let agents_dir = crate::cli::util::opencode_config_dir()
         .unwrap_or_default()
-        .join("skills");
-    match crate::skills_mgr::list_installed_skills(&skills_dir) {
-        Err(e) => CheckResult {
-            name: "Skills installed".to_string(),
-            status: CheckStatus::Fail,
-            message: format!("Error: {}", e),
-        },
-        Ok(skills) if skills.is_empty() => CheckResult {
-            name: "Skills installed".to_string(),
+        .join("agents");
+
+    if !agents_dir.exists() {
+        return CheckResult {
+            name: "Agents installed".to_string(),
             status: CheckStatus::Warn,
-            message: "No spex-* skills found. Run `spex skill install --all`.".to_string(),
-        },
-        Ok(skills) => CheckResult {
-            name: "Skills installed".to_string(),
+            message: "No agents directory found. Run `spex setup`.".to_string(),
+        };
+    }
+
+    let agents: Vec<String> = match std::fs::read_dir(&agents_dir) {
+        Err(e) => {
+            return CheckResult {
+                name: "Agents installed".to_string(),
+                status: CheckStatus::Fail,
+                message: format!("Error reading agents dir: {}", e),
+            }
+        }
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path().extension().and_then(|s| s.to_str()) == Some("md")
+            })
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect(),
+    };
+
+    if agents.is_empty() {
+        CheckResult {
+            name: "Agents installed".to_string(),
+            status: CheckStatus::Warn,
+            message: "No agent .md files found. Run `spex setup`.".to_string(),
+        }
+    } else {
+        CheckResult {
+            name: "Agents installed".to_string(),
             status: CheckStatus::Pass,
-            message: format!("{} skill(s): {}", skills.len(), skills.join(", ")),
-        },
+            message: format!("{} agent(s): {}", agents.len(), agents.join(", ")),
+        }
     }
 }
 
@@ -303,23 +325,23 @@ pub async fn fix_issues() -> Vec<(String, String)> {
         }
     }
 
-    // Fix 3: Install skills if missing
-    let skills_dir = crate::cli::util::opencode_config_dir()
+    // Fix 3: Install agents if missing
+    let agents_dir = crate::cli::util::opencode_config_dir()
         .unwrap_or_default()
-        .join("skills");
-    if !skills_dir.exists()
-        || crate::skills_mgr::list_installed_skills(&skills_dir)
-            .map(|s| s.is_empty())
-            .unwrap_or(true)
-    {
-        match crate::skills_mgr::install_bundled_skills(&skills_dir) {
-            Ok(_) => results.push((
-                "Skills installed".to_string(),
-                format!("Installed all bundled skills to {}", skills_dir.display()),
+        .join("agents");
+    let agents_missing = !agents_dir.exists()
+        || std::fs::read_dir(&agents_dir)
+            .map(|mut d| d.next().is_none())
+            .unwrap_or(true);
+    if agents_missing {
+        match crate::skills_mgr::install_bundled_agents(&agents_dir) {
+            Ok(n) => results.push((
+                "Agents installed".to_string(),
+                format!("Installed {} agent file(s) to {}", n, agents_dir.display()),
             )),
             Err(e) => results.push((
-                "Skills installed".to_string(),
-                format!("Could not install skills: {}", e),
+                "Agents installed".to_string(),
+                format!("Could not install agents: {}", e),
             )),
         }
     }
