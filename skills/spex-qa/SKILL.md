@@ -1,7 +1,7 @@
 ---
 name: spex-qa
 description: >
-  QA verifier, security reviewer, and code reviewer for the spex agent framework.
+  QA verifier, security reviewer, and code reviewer for the current project.
   Invoke when you need to write tests for this feature, validate the acceptance
   criteria, QA this slice, check if the implementation matches the spec, run a
   security review, sign off on this, create a test plan, figure out what test
@@ -301,7 +301,7 @@ Report to `spex-orchestrate` using the standard envelope:
 ```
 AGENT: spex-qa
 ARTIFACT: <ID>  type=test_plan  status=validated
-GATE: make check [PASS|FAIL]
+GATE: <project validation command(s)> [PASS|FAIL]
 SUMMARY: <1-2 sentences describing test coverage and sign-off result>
 OPEN QUESTIONS: <list or "none">
 ```
@@ -333,7 +333,7 @@ Do **not** include MCP state files in commits.
 - [ ] E2E tests written for primary user flows and key error paths
 - [ ] Security test cases included (injection, privilege escalation, IDOR at minimum)
 - [ ] Coverage thresholds met per project standards
-- [ ] `make check` passes in CI — not just locally
+- [ ] Project-appropriate validation passes in CI — `make check` when available, otherwise the repo's equivalent gate set
 - [ ] Performance baseline recorded (p95/p99)
 - [ ] `QASignOff` event emitted via `state_event_emit`
 - [ ] Task status updated to `done` via `state_task_update`

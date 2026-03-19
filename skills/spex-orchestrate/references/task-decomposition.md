@@ -21,7 +21,7 @@ Canonical patterns for breaking a slice spec into tasks, grouping them into wave
 | Database schema design, migration files | `spex-db` |
 | REST API endpoints, business logic, Symfony controllers/services | `spex-backend` |
 | React / Vue / Twig frontend components, pages | `spex-frontend` |
-| React Native / Flutter screens, native modules | `spex-mobile` |
+| Native Android / iOS screens, Swift/Kotlin modules, KMP/CMP shared code | `spex-mobile` |
 | Dockerfile, CI/CD pipeline, Kubernetes manifests, infra config | `spex-devops` |
 | LLM integration, RAG pipeline, embeddings, evals | `spex-ai-eng` |
 | Commit messages, branch creation, PR creation, CHANGELOG | `spex-gitops` |

@@ -32,7 +32,7 @@ You are a senior backend engineer and architect with deep expertise in:
 | [references/nodejs-typescript.md](references/nodejs-typescript.md) | NestJS modules/controllers/services, Zod, Prisma, Passport + JWT, BullMQ, Jest + Supertest |
 | [references/python-fastapi.md](references/python-fastapi.md) | Pydantic v2, SQLAlchemy 2 async, Alembic, Depends DI, Celery, pytest + httpx |
 | [references/api-contract-template.md](references/api-contract-template.md) | OpenAPI 3.1 skeleton, artifact front-matter, MCP storage pattern |
-| [references/mcp-protocol.md](references/mcp-protocol.md) | spex framework MCP integration (state check, artifact_register, handoff envelope) |
+| [references/mcp-protocol.md](references/mcp-protocol.md) | MCP integration for this project (state check, artifact_register, handoff envelope) |
 
 ---
 
@@ -140,7 +140,7 @@ See `references/patterns.md` for full detail. Quick reference:
 7. **Implement** async handlers for domain events listed in the slice spec
 8. **Document** new endpoints as a `PROJ-API-NNN` OpenAPI artifact (see `references/api-contract-template.md`)
 9. **Write tests** — unit (domain logic), integration (API endpoints + auth), contract (events)
-10. **Run `make check`** — all gates must exit 0; update task via `state_task_update`; report handoff
+10. **Run the project's backend validation commands** — use `make check` when available; otherwise run the repo's equivalent gate set before updating `state_task_update` and reporting handoff
 
 ---
 
@@ -149,7 +149,7 @@ See `references/patterns.md` for full detail. Quick reference:
 ```
 AGENT: spex-backend
 ARTIFACT: <ID>  type=api_contract  status=review
-GATE: make check [PASS|FAIL]
+GATE: <project backend validation> [PASS|FAIL]
 SUMMARY: <1-2 sentences describing what was implemented>
 OPEN QUESTIONS: <list or "none">
 ```
@@ -188,7 +188,7 @@ git commit -m "feat(api): <description> — Refs: TASK-NNN"
 - [ ] Unit tests: domain logic covered
 - [ ] Integration tests: all API endpoints covered (happy path + errors + auth)
 - [ ] Concurrent duplicate submission test included
-- [ ] `make check` exits 0
+- [ ] Project backend validation exits 0 — `make check` when available, otherwise the repo's equivalent gate set
 - [ ] `state_task_update` called with `status: "done"` and `output_artifact`
 - [ ] `session_context` saved to MCP memory
 - [ ] Handoff envelope reported to `spex-orchestrate`

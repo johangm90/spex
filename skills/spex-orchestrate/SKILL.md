@@ -15,7 +15,7 @@ description: "Universal AI engineering copilot entrypoint — classifies every d
 
 The orchestrator **never** writes code, migrations, tests, infra config, or git commands. It only classifies, delegates, tracks progress via MCP state, enforces quality gates, and summarises outcomes.
 
-**Preferred stack for this project:** PHP/Symfony + MariaDB.
+**Stack rule:** Respect the existing project stack. Do not assume a universal implementation stack.
 
 ---
 
@@ -26,7 +26,7 @@ The orchestrator **never** writes code, migrations, tests, infra config, or git 
 3. **MCP is the single source of truth.** All state — work items, tasks, events, artifacts, agent memory — lives exclusively in the MCP SQLite database. No state files are written to the repository.
 4. **Human-gated progression.** No wave, no next step, no slice activation, no resume happens without explicit human confirmation.
 5. **Escalate, never loop.** If the same gate fails twice consecutively, open a `blocked` GitHub issue and halt. Never retry indefinitely.
-6. **Two new specialist agents** are referenced below (`@spex-explore`, `@spex-debug`). They do not have SKILL.md files yet; delegate to them as subagents and describe the task clearly.
+6. **Explore before assigning ownership.** Use `@spex-explore` for codebase discovery, bug and incident investigation, and repository-grounded handoff context before routing to the owning specialist and `@spex-qa`.
 
 ---
 
@@ -57,7 +57,7 @@ RECEIVE request
 [DELEGATE] Assign to specialist agent(s) with task prompt
   │
   ▼
-[GATE] Collect output, validate artifact envelope, run make check if applicable
+[GATE] Collect output, validate artifact envelope, run project-appropriate validation gates if applicable
   │
   ▼
 [SUMMARIZE] Confirm outcome to human in ≤ 5 bullet points
@@ -126,8 +126,7 @@ Classify every incoming request into one of these 12 work types before routing:
 | Agent | Owns |
 |-------|------|
 | `@spex-architect` | PRD, ADRs, slice specs, bounded contexts, product discovery |
-| `@spex-explore` *(new)* | Codebase exploration, dependency mapping, discovery reports |
-| `@spex-debug` *(new)* | Bug isolation, root-cause analysis, reproduction scripts |
+| `@spex-explore` | Codebase exploration, dependency mapping, bug and incident discovery, handoff-ready reports |
 | `@spex-backend` | PHP/Symfony controllers, services, API contracts, business logic |
 | `@spex-frontend` | Web UI components, pages, design tokens, wireframes |
 | `@spex-db` | MariaDB schema design, Doctrine migrations, ERDs |
@@ -141,8 +140,8 @@ Classify every incoming request into one of these 12 work types before routing:
 | Work type | Primary agent(s) | Supporting agent(s) |
 |-----------|-----------------|-------------------|
 | `question` | `@spex-explore` or `@spex-architect` | — |
-| `bug` | `@spex-debug` | `@spex-backend`, `@spex-frontend`, `@spex-qa` |
-| `incident` | `@spex-debug` + `@spex-devops` | `@spex-backend` |
+| `bug` | `@spex-explore` | Owning specialist + `@spex-qa` |
+| `incident` | `@spex-explore` + `@spex-devops` | Owning specialist + `@spex-qa` |
 | `spike` | `@spex-explore` | `@spex-architect`, `@spex-ai-eng` |
 | `slice` | `@spex-db` → `@spex-backend` → `@spex-frontend` | `@spex-qa`, `@spex-gitops` |
 | `refactor` | Relevant impl agent | `@spex-qa` |
@@ -176,13 +175,13 @@ Classify every incoming request into one of these 12 work types before routing:
 
 1. Assign a work item ID: `BUG-NNN` or `INC-NNN`.
 2. Store in MCP: `state_slice_update` (use type `bug` or `incident`, status `triaged`).
-3. Delegate root-cause analysis to `@spex-debug` with full context (error message, stack trace, reproduction steps, affected endpoints/files).
+3. Delegate discovery and root-cause analysis to `@spex-explore` with full context (error message, stack trace, reproduction steps, affected endpoints/files).
 4. For incidents: simultaneously delegate infra triage to `@spex-devops`.
-5. Collect diagnosis report from `@spex-debug`.
-6. If a fix is needed: delegate to the owning implementation agent (`@spex-backend`, `@spex-frontend`, etc.) with the diagnosis as input.
+5. Collect the discovery report from `@spex-explore`.
+6. Delegate the fix to the owning implementation agent (`@spex-backend`, `@spex-frontend`, `@spex-mobile`, `@spex-devops`, etc.) with the discovery report as input.
 7. Delegate fix verification to `@spex-qa`.
-8. Run `make check` after fix is applied.
-9. Summarise: what broke, what was the root cause, what was fixed, what was verified.
+8. Run the project-appropriate validation gates for the changed surface area.
+9. Summarise: what broke, what was learned, what was fixed, and what was verified.
 10. Archive: update work item status to `done`; emit `BugFixed` or `IncidentResolved` event.
 
 ### Spike
@@ -225,8 +224,8 @@ This is the full wave-loop delivery process. See `references/wave-loop.md` for t
 For each wave:
 
 **a. Gate checkpoint (before wave N)**
-After previous wave completes and `make check` passes:
-> _"Wave N complete for [ID] — gates green ✅. Ready for Wave N+1: [task list]. Proceed, or would you like to pause?"_
+After previous wave completes and the relevant validation gates pass:
+> _"Wave N complete for [ID] — relevant gates green ✅. Ready for Wave N+1: [task list]. Proceed, or would you like to pause?"_
 - **Wait for human confirmation.** Never chain waves autonomously.
 - If pause requested → §11 Pause/Resume.
 
@@ -241,7 +240,7 @@ After previous wave completes and `make check` passes:
 - If valid → `state_task_update(id="T0NN-N", status="done", output_artifact="<id>")`.
 
 **d. Gate**
-- Run `make check`.
+- Run the project-appropriate validation gates for the changed surface area.
 - If green → proceed to next wave checkpoint.
 - If red → re-delegate to responsible agent with failure output.
 - If same gate fails twice → escalate (§15).
@@ -254,7 +253,7 @@ TASK: [task-id]
 WORK-ITEM: [ID]
 INPUTS: [artifact-id list — retrieve via artifact_query or memory_get]
 EXPECTED OUTPUT: [artifact-id] type=[type]
-DEADLINE GATE: make check must pass
+DEADLINE GATE: relevant project validation must pass for the changed surface area
 ---
 [task description: 3–5 sentences; reference the spec section that applies;
  no implementation details that belong to another agent]
@@ -262,7 +261,7 @@ DEADLINE GATE: make check must pass
 
 ### Close-out
 
-1. All waves complete and `make check` green.
+1. All waves complete and the relevant validation gates are green.
 2. Ask: _"All gates are green. Would you like me to create a feature branch and open a PR? I'll delegate that to @spex-gitops."_
 3. If yes → delegate to `@spex-gitops` (see `references/git-protocol.md`).
 4. If no → emit `SliceCompleted` event directly.
@@ -391,7 +390,7 @@ Body:
   Work item: [ID]
   Task:      [TASK-ID]
   Agent:     <agent-name>
-  Gate:      make check — <failing check name>
+  Gate:      project validation — <failing check name>
   Attempts:  2
   Last output: <paste gate failure>
   Action needed: human review
@@ -418,7 +417,7 @@ Labels: blocked
 Before marking any delivery work item `done`:
 
 - [ ] All waves complete
-- [ ] `make check` exits 0 on final wave
+- [ ] Relevant project validation gates pass on the final wave
 - [ ] `@spex-qa` signed off (QASignOff event emitted)
 - [ ] CHANGELOG entry added by `@spex-gitops` (or explicitly skipped by human)
 - [ ] Work item status updated to `done` via `state_slice_update`
@@ -442,7 +441,7 @@ Before marking any delivery work item `done`:
 **Never:**
 - Write application code, migrations, tests, infra config, or git commands
 - Make architectural decisions — defer to `@spex-architect`
-- Skip gates — `make check` must pass before advancing; no exceptions
+- Skip gates — relevant project validation must pass before advancing; no exceptions
 - Create branches or PRs — delegate entirely to `@spex-gitops`
 - Retry failed gates more than twice — escalate to `blocked` issue
 - Write any file to the project repository — all file writes are delegated

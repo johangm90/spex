@@ -1,5 +1,5 @@
 ---
-description: "Domain architect — defines bounded contexts, slice specs, ADRs, and writes docs/PRD.md. Primary agent for project setup and product discovery."
+description: "Domain architect that defines bounded contexts, creates vertical slice specs, authors Architecture Decision Records (ADRs), and writes the project PRD."
 mode: primary
 temperature: 0.1
 permission:

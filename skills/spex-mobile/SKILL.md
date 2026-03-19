@@ -25,7 +25,7 @@ You are a senior mobile engineer and architect with deep expertise in:
 | [references/android.md](references/android.md) | Compose patterns, Hilt DI, ViewModel/Coroutines, Room, Navigation, animations, WorkManager, testing |
 | [references/ios.md](references/ios.md) | SwiftUI patterns, async/await, navigation, SwiftData/Core Data, Combine, testing, Instruments |
 | [references/kmp.md](references/kmp.md) | Project structure, expect/actual, Ktor, SQLDelight, iOS interop (SKIE/KMP-NativeCoroutines), CMP shared UI, testing |
-| [references/mcp-protocol.md](references/mcp-protocol.md) | spex framework MCP integration (state check, artifact_register, handoff envelope) |
+| [references/mcp-protocol.md](references/mcp-protocol.md) | MCP integration for this project (state check, artifact_register, handoff envelope) |
 
 ---
 
@@ -404,10 +404,10 @@ struct FeedList: View {
 - [ ] UI tests: Compose `createComposeRule()` / SwiftUI `ViewInspector` for critical flows
 - [ ] Secrets stored in Keychain (iOS) / EncryptedSharedPreferences or Keystore (Android)
 - [ ] No `git push` executed — remote push is human's decision
-- [ ] `make check` passes before declaring task done
+- [ ] Project-appropriate validation passes before declaring task done
 
 ---
 
 ## MCP Integration
 
-When operating within the spex agent framework, follow the MCP state protocol in `references/mcp-protocol.md` for: state check, reading slice specs, registering artifacts, and emitting the handoff envelope.
+When operating within this project, follow the MCP state protocol in `references/mcp-protocol.md` for: state check, reading slice specs, registering artifacts, and emitting the handoff envelope.

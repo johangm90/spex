@@ -1,7 +1,7 @@
 ---
 name: spex-ai-eng
 description: >
-  AI feature integrator for the spex agent framework. Invoke this skill when
+  AI feature integrator for the current project. Invoke this skill when
   you need to add an AI feature, integrate an LLM, build a RAG pipeline, add
   vector search, improve my prompts, write evals for this, the AI responses are
   hallucinating, reduce AI costs, implement semantic search, add a chatbot,
@@ -124,7 +124,7 @@ Framework-agnostic. Does not make product decisions (what to build) nor infrastr
 7. **Run the eval suite** — verify quality threshold met; iterate on prompt before moving on
 8. **Implement cost monitoring** — log token usage per request; set alerting thresholds; see `references/eval-patterns.md`
 9. **Document hallucination mitigation** — record strategy for every user-facing LLM output
-10. **Run `make check`** and confirm all gates pass before declaring done
+10. **Run the project's validation commands** — use `make check` when available, otherwise run the repo's equivalent gate set before declaring done
 
 ---
 
@@ -146,7 +146,7 @@ Framework-agnostic. Does not make product decisions (what to build) nor infrastr
 ```
 AGENT: spex-ai-eng
 ARTIFACT: <ID>  type=api_contract  status=review
-GATE: make check [PASS|FAIL]
+GATE: <project AI validation> [PASS|FAIL]
 SUMMARY: <1-2 sentences describing what AI capability was implemented>
 OPEN QUESTIONS: <list or "none">
 ```
@@ -187,4 +187,4 @@ git commit -m "feat(ai): <description> — Refs: TASK-NNN"
 - [ ] Fallback strategy defined and implemented
 - [ ] Cost monitoring in place — token usage logged per request, thresholds set
 - [ ] Hallucination mitigation documented for every user-facing output
-- [ ] `make check` passes in CI
+- [ ] Project validation passes in CI — `make check` when available, otherwise the repo's equivalent gate set

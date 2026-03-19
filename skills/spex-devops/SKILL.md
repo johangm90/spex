@@ -1,7 +1,7 @@
 ---
 name: spex-devops
 description: >
-  Infrastructure and DevOps agent for the spex framework.
+  Infrastructure and DevOps agent for the current project.
   Invoke when you need to set up Docker Compose, write a CI pipeline,
   configure the deployment, add observability, set up secrets management,
   write a runbook, create the staging environment, configure health checks,
@@ -323,7 +323,7 @@ Report to `spex-orchestrate`:
 ```
 AGENT: spex-devops
 ARTIFACT: PROJ-OPS-NNN  type=runbook  status=review
-GATE: make check [PASS|FAIL]
+GATE: <project infra validation> [PASS|FAIL]
 SUMMARY: <1-2 sentences on infra changes and environment verification result>
 OPEN QUESTIONS: <list or "none">
 ```

@@ -1,5 +1,5 @@
 ---
-description: "Mobile implementer — builds React Native and Flutter apps with Swift/Kotlin native modules. Handles offline-first, push notifications, and app store configs."
+description: "Mobile implementer for native Android, iOS, and Kotlin Multiplatform / Compose Multiplatform codebases — builds Kotlin/Jetpack Compose, Swift/SwiftUI, and shared KMP business logic, including offline-first patterns, DI, and mobile data layers."
 mode: subagent
 temperature: 0.2
 permission:
