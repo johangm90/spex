@@ -1142,7 +1142,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(emit_result["ok"].as_bool().unwrap(), true);
+        assert!(emit_result["ok"].as_bool().unwrap());
 
         let events = dispatch_tool(
             &pool,
