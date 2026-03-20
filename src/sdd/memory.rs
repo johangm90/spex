@@ -241,7 +241,8 @@ pub async fn memory_context(
     qb.push(
         " AND deleted_at IS NULL \
          AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-         ORDER BY last_accessed_at DESC, access_count DESC \
+         ORDER BY (CAST(access_count AS REAL) + 1.0) / \
+           (julianday('now') - julianday(COALESCE(last_accessed_at, updated_at)) + 0.01) DESC \
          LIMIT ",
     );
     qb.push_bind(limit);
@@ -839,5 +840,70 @@ mod tests {
 
         let stats = memory_stats(&pool, "alice", Some("SPEC-001")).await.unwrap();
         assert_eq!(stats["total"], 2, "stats must count both spec-local and global entries");
+    }
+
+    #[tokio::test]
+    async fn context_frecency_fresh_write_appears_without_access() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "old", "v", None, None, None, None)
+            .await
+            .unwrap();
+        // Access "old" many times to inflate its access_count.
+        for _ in 0..5 {
+            memory_get_full(&pool, "alice", "old", None).await.unwrap();
+        }
+
+        // Tiny sleep to ensure "fresh" has a later updated_at.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        memory_set(&pool, "alice", "fresh", "v", None, None, None, None)
+            .await
+            .unwrap();
+        // "fresh" has access_count=0, last_accessed_at=NULL — frecency uses updated_at fallback.
+
+        let ctx = memory_context(&pool, "alice", None, Some(2)).await.unwrap();
+        assert_eq!(ctx.len(), 2);
+        // Fresh entry should appear in results (not be excluded by NULL last_accessed_at).
+        let keys: Vec<&str> = ctx.iter().map(|m| m.key.as_str()).collect();
+        assert!(
+            keys.contains(&"fresh"),
+            "fresh write must appear in context despite NULL last_accessed_at, got: {:?}",
+            keys
+        );
+    }
+
+    #[tokio::test]
+    async fn context_frecency_recent_beats_stale_high_count() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "stale", "v", None, None, None, None)
+            .await
+            .unwrap();
+        // Give "stale" a high access_count but old timestamps.
+        for _ in 0..10 {
+            memory_get_full(&pool, "alice", "stale", None).await.unwrap();
+        }
+        // Backdate stale's last_accessed_at to make it old.
+        sqlx::query(
+            "UPDATE memory SET last_accessed_at = '2020-01-01T00:00:00.000Z', \
+                               updated_at = '2020-01-01T00:00:00.000Z' \
+             WHERE agent = 'alice' AND key = 'stale'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        memory_set(&pool, "alice", "recent", "v", None, None, None, None)
+            .await
+            .unwrap();
+        memory_get_full(&pool, "alice", "recent", None).await.unwrap();
+
+        let ctx = memory_context(&pool, "alice", None, Some(1)).await.unwrap();
+        assert_eq!(ctx.len(), 1);
+        assert_eq!(
+            ctx[0].key, "recent",
+            "recent entry with 1 access must beat stale entry with 10 accesses from years ago"
+        );
     }
 }
