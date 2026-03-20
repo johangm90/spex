@@ -332,7 +332,6 @@ pub async fn memory_context(
 }
 
 /// Returns memory statistics for an agent (optionally scoped to a spec).
-#[allow(dead_code)]
 pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) -> Result<Value> {
     let (where_clause_base, spec_bind): (&str, bool) = if spec.is_some() {
         (

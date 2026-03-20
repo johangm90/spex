@@ -15,8 +15,9 @@ use crate::sdd::{
     },
     spec::{
         create_spec, get_spec, list_specs, update_spec_ac, update_spec_agents, update_spec_status,
+        SpecStatus,
     },
-    task::{create_task, get_task, list_tasks, update_task_output_artifact, update_task_status},
+    task::{create_task, get_task, list_tasks, update_task_output_artifact, update_task_status, TaskStatus},
 };
 
 #[derive(Debug, Deserialize)]
@@ -268,6 +269,12 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .unwrap_or("agent");
 
             if let Some(status) = args.get("status").and_then(|v| v.as_str()) {
+                SpecStatus::from_str(status).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Invalid spec status '{}'. Valid: draft, approved, in_progress, done, paused",
+                        status
+                    )
+                })?;
                 update_spec_status(pool, id, status, updated_by).await?;
             }
 
@@ -347,6 +354,12 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 .ok_or_else(|| anyhow::anyhow!("Missing field: id"))?;
 
             if let Some(status) = args.get("status").and_then(|v| v.as_str()) {
+                TaskStatus::from_str(status).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Invalid task status '{}'. Valid: pending, in_progress, done, failed",
+                        status
+                    )
+                })?;
                 update_task_status(pool, id, status).await?;
             }
 

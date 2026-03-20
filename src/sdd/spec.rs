@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[allow(dead_code)]
 pub enum SpecStatus {
     Draft,
     Approved,
@@ -13,7 +12,6 @@ pub enum SpecStatus {
     Paused,
 }
 
-#[allow(dead_code)]
 impl SpecStatus {
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
@@ -23,16 +21,6 @@ impl SpecStatus {
             "done" => Some(Self::Done),
             "paused" => Some(Self::Paused),
             _ => None,
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Draft => "draft",
-            Self::Approved => "approved",
-            Self::InProgress => "in_progress",
-            Self::Done => "done",
-            Self::Paused => "paused",
         }
     }
 }
