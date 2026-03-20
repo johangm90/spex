@@ -432,8 +432,11 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let spec = args.get("spec").and_then(|v| v.as_str());
             let mem_type = args.get("type").and_then(|v| v.as_str());
             let ttl_seconds = args.get("ttl_seconds").and_then(|v| v.as_i64());
+            let related_to = args
+                .get("related_to")
+                .map(|v| v.to_string());
 
-            memory_set(pool, agent, key, &value, spec, mem_type, ttl_seconds).await?;
+            memory_set(pool, agent, key, &value, spec, mem_type, ttl_seconds, related_to.as_deref()).await?;
             Ok(json!({"ok": true}))
         }
 
@@ -449,6 +452,8 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 let memory = memory_get_full(pool, agent, key, spec).await?;
                 if let Some(m) = memory {
                     let value = parse_memory_value(&m.value);
+                    let related_to: Value = serde_json::from_str(&m.related_to)
+                        .unwrap_or_else(|_| json!([]));
                     Ok(json!({
                         "value": value,
                         "type": m.type_,
@@ -457,6 +462,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                         "revision_count": m.revision_count,
                         "expires_at": m.expires_at,
                         "updated_at": m.updated_at,
+                        "related_to": related_to,
                     }))
                 } else {
                     Ok(json!({"value": null}))
@@ -745,7 +751,8 @@ fn build_tools_list() -> Value {
                     "value": {},
                     "spec": {"type": "string"},
                     "type": {"type": "string", "enum": ["decision","architecture","bugfix","pattern","config","discovery","learning"]},
-                    "ttl_seconds": {"type": "integer", "description": "Optional time-to-live in seconds from now"}
+                    "ttl_seconds": {"type": "integer", "description": "Optional time-to-live in seconds from now"},
+                    "related_to": {"type": "array", "items": {"type": "string"}, "description": "Optional list of related memory keys"}
                 },
                 "required": ["agent", "key", "value"]
             }

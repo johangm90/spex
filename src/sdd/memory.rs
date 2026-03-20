@@ -20,8 +20,10 @@ pub struct Memory {
     pub access_count: i64,
     pub last_accessed_at: Option<String>,
     pub revision_count: i64,
+    pub related_to: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn memory_set(
     pool: &SqlitePool,
     agent: &str,
@@ -30,26 +32,26 @@ pub async fn memory_set(
     spec: Option<&str>,
     mem_type: Option<&str>,
     ttl_seconds: Option<i64>,
+    related_to: Option<&str>,
 ) -> Result<()> {
     let spec = spec.unwrap_or("");
+    let related_to = related_to.unwrap_or("[]");
 
-    // Compute expires_at from ttl_seconds if provided.
-    // Use the same ISO-8601 format as all other timestamps (with T and Z) so that
-    // SQLite string comparisons with strftime('%Y-%m-%dT%H:%M:%fZ','now') work correctly.
     let expires_at: Option<String> = ttl_seconds.map(|ttl| {
         let future = chrono::Utc::now() + chrono::Duration::seconds(ttl);
         future.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string()
     });
 
     sqlx::query(
-        "INSERT INTO memory (agent, key, value, spec, type, expires_at, revision_count) \
-         VALUES (?, ?, ?, ?, ?, ?, 1) \
+        "INSERT INTO memory (agent, key, value, spec, type, expires_at, revision_count, related_to) \
+         VALUES (?, ?, ?, ?, ?, ?, 1, ?) \
          ON CONFLICT(agent, spec, key) DO UPDATE SET \
            value = excluded.value, \
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
            revision_count = revision_count + 1, \
            type = COALESCE(excluded.type, type), \
            expires_at = COALESCE(excluded.expires_at, expires_at), \
+           related_to = excluded.related_to, \
            deleted_at = NULL, \
            access_count = 0, \
            last_accessed_at = NULL",
@@ -60,6 +62,7 @@ pub async fn memory_set(
     .bind(spec)
     .bind(mem_type)
     .bind(expires_at)
+    .bind(related_to)
     .execute(pool)
     .await?;
     Ok(())
@@ -75,7 +78,7 @@ pub async fn memory_get_full(
 ) -> Result<Option<Memory>> {
     let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
         "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
-                access_count, last_accessed_at, revision_count \
+                access_count, last_accessed_at, revision_count, related_to \
          FROM memory WHERE agent = ",
     );
     qb.push_bind(agent);
@@ -124,7 +127,7 @@ pub async fn memory_list(
 
     let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
         "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
-                access_count, last_accessed_at, revision_count \
+                access_count, last_accessed_at, revision_count, related_to \
          FROM memory WHERE agent = ",
     );
     qb.push_bind(agent);
@@ -163,7 +166,7 @@ pub async fn memory_search(
     let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
         "SELECT m.id, m.agent, m.key, m.value, m.spec, m.updated_at, \
                 m.type, m.deleted_at, m.expires_at, \
-                m.access_count, m.last_accessed_at, m.revision_count \
+                m.access_count, m.last_accessed_at, m.revision_count, m.related_to \
          FROM memory m \
          JOIN memory_fts f ON m.rowid = f.rowid \
          WHERE memory_fts MATCH ",
@@ -223,7 +226,7 @@ pub async fn memory_context(
 
     let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
         "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
-                access_count, last_accessed_at, revision_count \
+                access_count, last_accessed_at, revision_count, related_to \
          FROM memory WHERE agent = ",
     );
     qb.push_bind(agent);
@@ -367,19 +370,11 @@ mod tests {
     async fn ac1_search_returns_fts5_results() {
         let pool = make_pool().await;
 
-        memory_set(
-            &pool,
-            "alice",
-            "arch_decision",
-            "we use sqlite for persistence",
-            None,
-            None,
-            None,
-        )
+        memory_set(&pool, "alice", "arch_decision", "we use sqlite for persistence", None, None, None, None)
         .await
         .unwrap();
 
-        memory_set(&pool, "alice", "unrelated", "hello world", None, None, None)
+        memory_set(&pool, "alice", "unrelated", "hello world", None, None, None, None)
             .await
             .unwrap();
 
@@ -396,7 +391,7 @@ mod tests {
     async fn ac2_delete_soft_deletes_and_hides_entry() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "foo", "bar", None, None, None)
+        memory_set(&pool, "alice", "foo", "bar", None, None, None, None)
             .await
             .unwrap();
 
@@ -432,15 +427,7 @@ mod tests {
     async fn ac3_memory_set_accepts_type_field() {
         let pool = make_pool().await;
 
-        memory_set(
-            &pool,
-            "alice",
-            "my_key",
-            "my_value",
-            Some("spec"),
-            Some("decision"),
-            None,
-        )
+        memory_set(&pool, "alice", "my_key", "my_value", Some("spec"), Some("decision"), None, None)
         .await
         .unwrap();
 
@@ -468,7 +455,8 @@ mod tests {
             "expiring_value",
             None,
             None,
-            Some(1), // 1-second TTL
+            Some(1),
+            None,
         )
         .await
         .unwrap();
@@ -498,7 +486,7 @@ mod tests {
         let pool = make_pool().await;
 
         for key in &["k1", "k2", "k3"] {
-            memory_set(&pool, "alice", key, "value", None, None, None)
+            memory_set(&pool, "alice", key, "value", None, None, None, None)
                 .await
                 .unwrap();
         }
@@ -517,13 +505,13 @@ mod tests {
     async fn ac6_stats_returns_correct_counts() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "k1", "v1", None, Some("decision"), None)
+        memory_set(&pool, "alice", "k1", "v1", None, Some("decision"), None, None)
             .await
             .unwrap();
-        memory_set(&pool, "alice", "k2", "v2", None, Some("pattern"), None)
+        memory_set(&pool, "alice", "k2", "v2", None, Some("pattern"), None, None)
             .await
             .unwrap();
-        memory_set(&pool, "alice", "k3", "v3", None, None, None)
+        memory_set(&pool, "alice", "k3", "v3", None, None, None, None)
             .await
             .unwrap();
 
@@ -549,7 +537,7 @@ mod tests {
     async fn ac7_memory_get_bumps_access_count() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "tracked", "v", None, None, None)
+        memory_set(&pool, "alice", "tracked", "v", None, None, None, None)
             .await
             .unwrap();
 
@@ -583,7 +571,7 @@ mod tests {
     async fn ac8_set_after_delete_resurrects_entry() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "ephemeral", "v1", None, Some("decision"), None)
+        memory_set(&pool, "alice", "ephemeral", "v1", None, Some("decision"), None, None)
             .await
             .unwrap();
 
@@ -593,7 +581,7 @@ mod tests {
         let gone = memory_get_full(&pool, "alice", "ephemeral", None).await.unwrap();
         assert!(gone.is_none(), "soft-deleted entry must be invisible");
 
-        memory_set(&pool, "alice", "ephemeral", "v2", None, Some("pattern"), None)
+        memory_set(&pool, "alice", "ephemeral", "v2", None, Some("pattern"), None, None)
             .await
             .unwrap();
 
@@ -612,10 +600,10 @@ mod tests {
     async fn gc_removes_soft_deleted() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "keep", "v", None, None, None)
+        memory_set(&pool, "alice", "keep", "v", None, None, None, None)
             .await
             .unwrap();
-        memory_set(&pool, "alice", "trash", "v", None, None, None)
+        memory_set(&pool, "alice", "trash", "v", None, None, None, None)
             .await
             .unwrap();
         memory_delete(&pool, "alice", "trash", None).await.unwrap();
@@ -642,10 +630,10 @@ mod tests {
     async fn gc_removes_expired() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "fresh", "v", None, None, None)
+        memory_set(&pool, "alice", "fresh", "v", None, None, None, None)
             .await
             .unwrap();
-        memory_set(&pool, "alice", "stale", "v", None, None, Some(9999))
+        memory_set(&pool, "alice", "stale", "v", None, None, Some(9999), None)
             .await
             .unwrap();
 
@@ -673,7 +661,7 @@ mod tests {
     async fn gc_dry_run_preserves_rows() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "trash", "v", None, None, None)
+        memory_set(&pool, "alice", "trash", "v", None, None, None, None)
             .await
             .unwrap();
         memory_delete(&pool, "alice", "trash", None).await.unwrap();
@@ -694,10 +682,10 @@ mod tests {
     async fn gc_preserves_fts_consistency() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "survives", "important data", None, None, None)
+        memory_set(&pool, "alice", "survives", "important data", None, None, None, None)
             .await
             .unwrap();
-        memory_set(&pool, "alice", "dies", "doomed data", None, None, None)
+        memory_set(&pool, "alice", "dies", "doomed data", None, None, None, None)
             .await
             .unwrap();
         memory_delete(&pool, "alice", "dies", None).await.unwrap();
@@ -714,5 +702,55 @@ mod tests {
             .await
             .unwrap();
         assert!(ghost.is_empty(), "GC'd entry must not appear in FTS results");
+    }
+
+    #[tokio::test]
+    async fn memory_set_with_related_to_stores_links() {
+        let pool = make_pool().await;
+
+        let links = r#"["agent1/key-a","agent1/key-b"]"#;
+        memory_set(&pool, "alice", "linked", "v", None, None, None, Some(links))
+            .await
+            .unwrap();
+
+        let mem = memory_get_full(&pool, "alice", "linked", None)
+            .await
+            .unwrap()
+            .expect("entry should exist");
+
+        assert_eq!(mem.related_to, links);
+    }
+
+    #[tokio::test]
+    async fn memory_set_without_related_to_defaults_to_empty_array() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "solo", "v", None, None, None, None)
+            .await
+            .unwrap();
+
+        let mem = memory_get_full(&pool, "alice", "solo", None)
+            .await
+            .unwrap()
+            .expect("entry should exist");
+
+        assert_eq!(mem.related_to, "[]");
+    }
+
+    #[tokio::test]
+    async fn memory_search_includes_related_to() {
+        let pool = make_pool().await;
+
+        let links = r#"["alice/other"]"#;
+        memory_set(&pool, "alice", "searchable", "findme data", None, None, None, Some(links))
+            .await
+            .unwrap();
+
+        let results = memory_search(&pool, "alice", "findme", None, None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].related_to, links);
     }
 }
