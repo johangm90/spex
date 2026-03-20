@@ -119,3 +119,70 @@ pub async fn query_artifacts(
         )
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sdd::test_helpers::make_pool;
+
+    #[tokio::test]
+    async fn test_register_artifact_fields() {
+        let pool = make_pool().await;
+        let artifact = register_artifact(
+            &pool,
+            "art-001",
+            Some("SPEC-001"),
+            Some("task-1"),
+            "builder-agent",
+            "code",
+            Some("/src/lib.rs"),
+            Some("main library"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(artifact.id, "art-001");
+        assert_eq!(artifact.spec.as_deref(), Some("SPEC-001"));
+        assert_eq!(artifact.task.as_deref(), Some("task-1"));
+        assert_eq!(artifact.agent, "builder-agent");
+        assert_eq!(artifact.r#type, "code");
+        assert_eq!(artifact.path.as_deref(), Some("/src/lib.rs"));
+        assert_eq!(artifact.description.as_deref(), Some("main library"));
+        assert!(!artifact.created_at.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_query_artifacts_agent_filter() {
+        let pool = make_pool().await;
+        register_artifact(&pool, "a1", None, None, "agent-alpha", "doc", None, None)
+            .await
+            .unwrap();
+        register_artifact(&pool, "a2", None, None, "agent-beta", "doc", None, None)
+            .await
+            .unwrap();
+        let results = query_artifacts(&pool, None, None, Some("agent-alpha"), None)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].agent, "agent-alpha");
+    }
+
+    #[tokio::test]
+    async fn test_query_artifacts_no_filters_returns_all() {
+        let pool = make_pool().await;
+        register_artifact(&pool, "b1", None, None, "agent-x", "code", None, None)
+            .await
+            .unwrap();
+        register_artifact(&pool, "b2", None, None, "agent-y", "doc", None, None)
+            .await
+            .unwrap();
+        let results = query_artifacts(&pool, None, None, None, None).await.unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_query_artifacts_empty_db() {
+        let pool = make_pool().await;
+        let results = query_artifacts(&pool, None, None, None, None).await.unwrap();
+        assert!(results.is_empty());
+    }
+}

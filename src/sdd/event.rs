@@ -102,3 +102,68 @@ pub async fn query_events(
         })
         .collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sdd::test_helpers::make_pool;
+
+    #[tokio::test]
+    async fn test_emit_and_query_event_happy_path() {
+        let pool = make_pool().await;
+        emit_event(&pool, "task.created", Some("SPEC-001"), Some("agent-x"), r#"{"key":"val"}"#)
+            .await
+            .unwrap();
+        let events = query_events(&pool, None, None, None, None, None, None).await.unwrap();
+        assert_eq!(events.len(), 1);
+        let e = &events[0];
+        assert_eq!(e.r#type, "task.created");
+        assert_eq!(e.spec.as_deref(), Some("SPEC-001"));
+        assert_eq!(e.agent.as_deref(), Some("agent-x"));
+        assert_eq!(e.payload, r#"{"key":"val"}"#);
+        assert!(!e.timestamp.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_query_events_type_filter() {
+        let pool = make_pool().await;
+        emit_event(&pool, "spec.created", None, None, "{}").await.unwrap();
+        emit_event(&pool, "task.done", None, None, "{}").await.unwrap();
+        let events = query_events(&pool, Some("spec.created"), None, None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].r#type, "spec.created");
+    }
+
+    #[tokio::test]
+    async fn test_query_events_spec_filter() {
+        let pool = make_pool().await;
+        emit_event(&pool, "ev", Some("SPEC-A"), None, "{}").await.unwrap();
+        emit_event(&pool, "ev", Some("SPEC-B"), None, "{}").await.unwrap();
+        let events = query_events(&pool, None, Some("SPEC-A"), None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].spec.as_deref(), Some("SPEC-A"));
+    }
+
+    #[tokio::test]
+    async fn test_query_events_limit() {
+        let pool = make_pool().await;
+        for i in 0..5 {
+            emit_event(&pool, "ev", None, None, &format!(r#"{{"i":{}}}"#, i))
+                .await
+                .unwrap();
+        }
+        let events = query_events(&pool, None, None, None, Some(2), None, None).await.unwrap();
+        assert_eq!(events.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_query_events_empty_db() {
+        let pool = make_pool().await;
+        let events = query_events(&pool, None, None, None, None, None, None).await.unwrap();
+        assert!(events.is_empty());
+    }
+}

@@ -439,19 +439,7 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::SqlitePool;
-
-    /// Create a fresh in-memory SQLite pool and run all migrations.
-    async fn make_pool() -> SqlitePool {
-        let pool = SqlitePool::connect(":memory:")
-            .await
-            .expect("failed to open in-memory SQLite");
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("failed to run migrations");
-        pool
-    }
+    use crate::sdd::test_helpers::make_pool;
 
     // AC1 — memory_search returns FTS5 results for matching entries only.
     #[tokio::test]

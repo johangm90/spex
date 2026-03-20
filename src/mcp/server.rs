@@ -847,3 +847,214 @@ fn detect_config_source(project_dir: &str) -> &'static str {
 
     "unknown"
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sdd::test_helpers::make_pool;
+
+    #[tokio::test]
+    async fn state_snapshot_returns_required_keys() {
+        let pool = make_pool().await;
+        let result = dispatch_tool(&pool, "state_snapshot", json!({}))
+            .await
+            .unwrap();
+        assert!(result.get("specs").is_some(), "missing 'specs' key");
+        assert!(result.get("tasks").is_some(), "missing 'tasks' key");
+        assert!(
+            result.get("recent_events").is_some(),
+            "missing 'recent_events' key"
+        );
+    }
+
+    #[tokio::test]
+    async fn state_slice_create_then_get() {
+        let pool = make_pool().await;
+
+        let created = dispatch_tool(
+            &pool,
+            "state_slice_create",
+            json!({"id": "SPEC-001", "title": "Auth feature", "priority": "P0"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(created["id"].as_str().unwrap(), "SPEC-001");
+        assert_eq!(created["title"].as_str().unwrap(), "Auth feature");
+
+        let fetched = dispatch_tool(&pool, "state_slice_get", json!({"id": "SPEC-001"}))
+            .await
+            .unwrap();
+
+        assert_eq!(fetched["id"].as_str().unwrap(), "SPEC-001");
+        assert_eq!(fetched["title"].as_str().unwrap(), "Auth feature");
+        assert_eq!(fetched["priority"].as_str().unwrap(), "P0");
+    }
+
+    #[tokio::test]
+    async fn state_task_create_then_get() {
+        let pool = make_pool().await;
+
+        dispatch_tool(
+            &pool,
+            "state_slice_create",
+            json!({"id": "SPEC-T01", "title": "Task parent spec"}),
+        )
+        .await
+        .unwrap();
+
+        let created = dispatch_tool(
+            &pool,
+            "state_task_create",
+            json!({
+                "id": "TASK-001",
+                "spec": "SPEC-T01",
+                "title": "Implement login",
+                "agent": "sdd-builder"
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(created["id"].as_str().unwrap(), "TASK-001");
+        assert_eq!(created["spec"].as_str().unwrap(), "SPEC-T01");
+        assert_eq!(created["title"].as_str().unwrap(), "Implement login");
+        assert_eq!(created["agent"].as_str().unwrap(), "sdd-builder");
+
+        let fetched = dispatch_tool(&pool, "state_task_get", json!({"id": "TASK-001"}))
+            .await
+            .unwrap();
+
+        assert_eq!(fetched["id"].as_str().unwrap(), "TASK-001");
+        assert_eq!(fetched["title"].as_str().unwrap(), "Implement login");
+    }
+
+    #[tokio::test]
+    async fn memory_set_then_get() {
+        let pool = make_pool().await;
+
+        dispatch_tool(
+            &pool,
+            "memory_set",
+            json!({"agent": "test-agent", "key": "mykey", "value": "hello-world"}),
+        )
+        .await
+        .unwrap();
+
+        let fetched = dispatch_tool(
+            &pool,
+            "memory_get",
+            json!({"agent": "test-agent", "key": "mykey"}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(fetched["value"].as_str().unwrap(), "hello-world");
+    }
+
+    #[tokio::test]
+    async fn state_event_emit_then_query() {
+        let pool = make_pool().await;
+
+        let emit_result = dispatch_tool(
+            &pool,
+            "state_event_emit",
+            json!({"type": "test.event", "agent": "test-agent", "payload": {"msg": "hi"}}),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(emit_result["ok"].as_bool().unwrap(), true);
+
+        let events = dispatch_tool(
+            &pool,
+            "state_event_query",
+            json!({"type": "test.event", "limit": 5}),
+        )
+        .await
+        .unwrap();
+
+        let arr = events.as_array().unwrap();
+        assert!(!arr.is_empty(), "expected at least one event");
+        assert_eq!(arr[0]["type"].as_str().unwrap(), "test.event");
+    }
+
+    #[tokio::test]
+    async fn unknown_tool_returns_err() {
+        let pool = make_pool().await;
+        let result = dispatch_tool(&pool, "nonexistent_tool", json!({})).await;
+        assert!(result.is_err(), "expected Err for unknown tool");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("Unknown tool"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_request_initialize() {
+        let pool = make_pool().await;
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(1)),
+            method: "initialize".to_string(),
+            params: None,
+        };
+        let resp = handle_request(&pool, req).await.unwrap();
+        let result = resp.result.expect("expected result");
+        assert!(result.get("protocolVersion").is_some());
+        assert!(result.get("capabilities").is_some());
+        assert!(result.get("serverInfo").is_some());
+    }
+
+    #[tokio::test]
+    async fn handle_request_tools_list_has_18_items() {
+        let pool = make_pool().await;
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(2)),
+            method: "tools/list".to_string(),
+            params: None,
+        };
+        let resp = handle_request(&pool, req).await.unwrap();
+        let result = resp.result.expect("expected result");
+        let tools = result["tools"].as_array().expect("tools must be array");
+        assert_eq!(tools.len(), 18, "expected 18 tools, got {}", tools.len());
+    }
+
+    #[tokio::test]
+    async fn handle_request_tools_call_valid_tool() {
+        let pool = make_pool().await;
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(3)),
+            method: "tools/call".to_string(),
+            params: Some(json!({
+                "name": "state_snapshot",
+                "arguments": {}
+            })),
+        };
+        let resp = handle_request(&pool, req).await.unwrap();
+        assert!(resp.error.is_none(), "expected no error");
+        let result = resp.result.expect("expected result");
+        let content = result["content"].as_array().expect("content must be array");
+        assert!(!content.is_empty());
+        assert_eq!(content[0]["type"].as_str().unwrap(), "text");
+    }
+
+    #[tokio::test]
+    async fn handle_request_unknown_method_returns_error_code() {
+        let pool = make_pool().await;
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(json!(99)),
+            method: "bogus/method".to_string(),
+            params: None,
+        };
+        let resp = handle_request(&pool, req).await.unwrap();
+        assert!(resp.result.is_none(), "expected no result");
+        let err = resp.error.expect("expected error");
+        assert_eq!(err.code, -32601);
+        assert!(err.message.contains("bogus/method"));
+    }
+}
