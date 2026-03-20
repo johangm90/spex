@@ -124,7 +124,10 @@ pub async fn list_tasks(
 fn validate_task_transition(from: &str, to: &str) -> Result<()> {
     let valid = matches!(
         (from, to),
-        ("pending", "in_progress") | ("in_progress", "done") | ("in_progress", "failed")
+        ("pending", "in_progress")
+            | ("in_progress", "done")
+            | ("in_progress", "failed")
+            | ("failed", "pending")
     );
     if !valid {
         return Err(anyhow!("Invalid task transition: {} -> {}", from, to));
@@ -430,6 +433,7 @@ mod tests {
         validate_task_transition("pending", "in_progress").unwrap();
         validate_task_transition("in_progress", "done").unwrap();
         validate_task_transition("in_progress", "failed").unwrap();
+        validate_task_transition("failed", "pending").unwrap();
     }
 
     // TC-16: create_task stores inputs as JSON array.
@@ -455,5 +459,38 @@ mod tests {
 
         let parsed: Vec<String> = serde_json::from_str(&task.inputs).unwrap();
         assert_eq!(parsed, inputs, "inputs must be stored and retrieved as JSON array");
+    }
+
+    // TC-17: failed → pending (replan) succeeds via update_task_status.
+    #[tokio::test]
+    async fn tc17_valid_transition_failed_to_pending_replan() {
+        let pool = make_pool().await;
+        setup_task(&pool, "TASK-001").await;
+        update_task_status(&pool, "TASK-001", "in_progress")
+            .await
+            .unwrap();
+        update_task_status(&pool, "TASK-001", "failed")
+            .await
+            .unwrap();
+
+        let updated = update_task_status(&pool, "TASK-001", "pending")
+            .await
+            .unwrap();
+        assert_eq!(updated.status, "pending", "status must be pending after failed→pending replan");
+    }
+
+    // TC-18: full round-trip: pending → in_progress → failed → pending → in_progress → done.
+    #[tokio::test]
+    async fn tc18_full_replan_round_trip() {
+        let pool = make_pool().await;
+        setup_task(&pool, "TASK-001").await;
+
+        update_task_status(&pool, "TASK-001", "in_progress").await.unwrap();
+        update_task_status(&pool, "TASK-001", "failed").await.unwrap();
+        update_task_status(&pool, "TASK-001", "pending").await.unwrap();
+        update_task_status(&pool, "TASK-001", "in_progress").await.unwrap();
+
+        let updated = update_task_status(&pool, "TASK-001", "done").await.unwrap();
+        assert_eq!(updated.status, "done", "task must reach done after replan round-trip");
     }
 }
