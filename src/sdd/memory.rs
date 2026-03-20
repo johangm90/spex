@@ -85,8 +85,9 @@ pub async fn memory_get_full(
     qb.push(" AND key = ");
     qb.push_bind(key);
     if let Some(s) = spec {
-        qb.push(" AND spec = ");
+        qb.push(" AND (spec = ");
         qb.push_bind(s);
+        qb.push(" OR spec = '*')");
     }
     qb.push(
         " AND deleted_at IS NULL \
@@ -132,8 +133,9 @@ pub async fn memory_list(
     );
     qb.push_bind(agent);
     if let Some(s) = spec {
-        qb.push(" AND spec = ");
+        qb.push(" AND (spec = ");
         qb.push_bind(s);
+        qb.push(" OR spec = '*')");
     }
     if let Some(t) = mem_type {
         qb.push(" AND type = ");
@@ -175,8 +177,9 @@ pub async fn memory_search(
     qb.push(" AND m.agent = ");
     qb.push_bind(agent);
     if let Some(s) = spec {
-        qb.push(" AND m.spec = ");
+        qb.push(" AND (m.spec = ");
         qb.push_bind(s);
+        qb.push(" OR m.spec = '*')");
     }
     if let Some(t) = mem_type {
         qb.push(" AND m.type = ");
@@ -231,8 +234,9 @@ pub async fn memory_context(
     );
     qb.push_bind(agent);
     if let Some(s) = spec {
-        qb.push(" AND spec = ");
+        qb.push(" AND (spec = ");
         qb.push_bind(s);
+        qb.push(" OR spec = '*')");
     }
     qb.push(
         " AND deleted_at IS NULL \
@@ -257,8 +261,9 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
             ));
             $qb.push_bind(agent);
             if let Some(s) = spec {
-                $qb.push(" AND spec = ");
+                $qb.push(" AND (spec = ");
                 $qb.push_bind(s);
+                $qb.push(" OR spec = '*')");
             }
             $qb.push(format!(" AND {} {}", alive_filter, $suffix));
             $qb
@@ -752,5 +757,87 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].related_to, links);
+    }
+
+    #[tokio::test]
+    async fn cross_spec_global_entry_visible_when_querying_specific_spec() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "local", "local-val", Some("SPEC-001"), None, None, None)
+            .await
+            .unwrap();
+        memory_set(&pool, "alice", "global", "global-val", Some("*"), None, None, None)
+            .await
+            .unwrap();
+        memory_set(&pool, "alice", "other", "other-val", Some("SPEC-002"), None, None, None)
+            .await
+            .unwrap();
+
+        let results = memory_list(&pool, "alice", Some("SPEC-001"), None, None, None)
+            .await
+            .unwrap();
+
+        let keys: Vec<&str> = results.iter().map(|m| m.key.as_str()).collect();
+        assert!(keys.contains(&"local"), "spec-local entry must appear");
+        assert!(keys.contains(&"global"), "global (*) entry must appear");
+        assert!(!keys.contains(&"other"), "other-spec entry must not appear");
+    }
+
+    #[tokio::test]
+    async fn cross_spec_global_entry_visible_in_search() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "spec-data", "shared pattern", Some("SPEC-001"), None, None, None)
+            .await
+            .unwrap();
+        memory_set(&pool, "alice", "global-data", "shared pattern", Some("*"), None, None, None)
+            .await
+            .unwrap();
+
+        let results = memory_search(&pool, "alice", "shared", Some("SPEC-001"), None, None)
+            .await
+            .unwrap();
+
+        let keys: Vec<&str> = results.iter().map(|m| m.key.as_str()).collect();
+        assert!(keys.contains(&"spec-data"));
+        assert!(keys.contains(&"global-data"));
+    }
+
+    #[tokio::test]
+    async fn cross_spec_global_entry_visible_in_context() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "ctx-local", "v", Some("SPEC-001"), None, None, None)
+            .await
+            .unwrap();
+        memory_set(&pool, "alice", "ctx-global", "v", Some("*"), None, None, None)
+            .await
+            .unwrap();
+
+        memory_get_full(&pool, "alice", "ctx-local", Some("SPEC-001")).await.unwrap();
+        memory_get_full(&pool, "alice", "ctx-global", Some("*")).await.unwrap();
+
+        let results = memory_context(&pool, "alice", Some("SPEC-001"), None)
+            .await
+            .unwrap();
+
+        let keys: Vec<&str> = results.iter().map(|m| m.key.as_str()).collect();
+        assert!(keys.contains(&"ctx-local"));
+        assert!(keys.contains(&"ctx-global"));
+    }
+
+    #[tokio::test]
+    async fn cross_spec_stats_includes_global_entries() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "s1", "v", Some("SPEC-001"), None, None, None)
+            .await
+            .unwrap();
+        memory_set(&pool, "alice", "g1", "v", Some("*"), None, None, None)
+            .await
+            .unwrap();
+
+        let stats = memory_stats(&pool, "alice", Some("SPEC-001")).await.unwrap();
+        assert_eq!(stats["total"], 2, "stats must count both spec-local and global entries");
     }
 }
