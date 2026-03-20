@@ -345,14 +345,14 @@ pub struct GcResult {
 }
 
 pub async fn memory_gc(pool: &SqlitePool, dry_run: bool) -> Result<GcResult> {
-    let soft_deleted: Vec<(String, String)> = sqlx::query_as(
-        "SELECT agent, key FROM memory WHERE deleted_at IS NOT NULL",
+    let soft_deleted: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT agent, key, spec FROM memory WHERE deleted_at IS NOT NULL",
     )
     .fetch_all(pool)
     .await?;
 
-    let expired: Vec<(String, String)> = sqlx::query_as(
-        "SELECT agent, key FROM memory \
+    let expired: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT agent, key, spec FROM memory \
          WHERE expires_at IS NOT NULL \
            AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
            AND deleted_at IS NULL",
@@ -363,12 +363,13 @@ pub async fn memory_gc(pool: &SqlitePool, dry_run: bool) -> Result<GcResult> {
     let deleted_count = soft_deleted.len() as u64;
     let expired_count = expired.len() as u64;
 
-    let sample_keys: Vec<String> = soft_deleted
+    let purged_ids: Vec<String> = soft_deleted
         .iter()
         .chain(expired.iter())
-        .take(10)
-        .map(|(agent, key)| format!("{}/{}", agent, key))
+        .map(|(agent, key, _spec)| format!("{}/{}", agent, key))
         .collect();
+
+    let sample_keys: Vec<String> = purged_ids.iter().take(10).cloned().collect();
 
     if !dry_run && (deleted_count > 0 || expired_count > 0) {
         sqlx::query("DELETE FROM memory WHERE deleted_at IS NOT NULL")
@@ -383,6 +384,8 @@ pub async fn memory_gc(pool: &SqlitePool, dry_run: bool) -> Result<GcResult> {
         .execute(pool)
         .await?;
 
+        gc_clean_orphan_refs(pool, &purged_ids).await?;
+
         sqlx::query("INSERT INTO memory_fts(memory_fts) VALUES ('rebuild')")
             .execute(pool)
             .await?;
@@ -393,6 +396,39 @@ pub async fn memory_gc(pool: &SqlitePool, dry_run: bool) -> Result<GcResult> {
         expired_count,
         sample_keys,
     })
+}
+
+async fn gc_clean_orphan_refs(pool: &SqlitePool, purged_ids: &[String]) -> Result<()> {
+    if purged_ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT DISTINCT m.id, m.related_to \
+         FROM memory m JOIN json_each(m.related_to) j ON j.type = 'text' \
+         WHERE j.value IN (",
+    );
+    let mut sep = qb.separated(", ");
+    for id in purged_ids {
+        sep.push_bind(id);
+    }
+    sep.push_unseparated(") AND m.deleted_at IS NULL");
+
+    let affected: Vec<(i64, String)> = qb.build_query_as().fetch_all(pool).await?;
+
+    for (row_id, related_json) in &affected {
+        let arr: Vec<String> = serde_json::from_str(related_json).unwrap_or_default();
+        let cleaned: Vec<&String> = arr.iter().filter(|r| !purged_ids.contains(r)).collect();
+        let new_json = serde_json::to_string(&cleaned)?;
+
+        sqlx::query("UPDATE memory SET related_to = ? WHERE id = ?")
+            .bind(&new_json)
+            .bind(row_id)
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(())
 }
 
 // ─── Integration Tests (MEMS-001, AC1–AC7) ───────────────────────────────────
@@ -1016,5 +1052,29 @@ mod tests {
         let refs = memory_find_referencing(&pool, "bob/target", Some("SPEC-001")).await.unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].key, "s1-link");
+    }
+
+    #[tokio::test]
+    async fn gc_cleans_orphan_related_to_refs() {
+        let pool = make_pool().await;
+
+        memory_set(
+            &pool, "alice", "parent", "v", None, None, None,
+            Some(r#"["bob/child","carol/keeper"]"#),
+        ).await.unwrap();
+        memory_set(&pool, "bob", "child", "v", None, None, None, None)
+            .await.unwrap();
+        memory_set(&pool, "carol", "keeper", "v", None, None, None, None)
+            .await.unwrap();
+
+        memory_delete(&pool, "bob", "child", None).await.unwrap();
+
+        let result = memory_gc(&pool, false).await.unwrap();
+        assert_eq!(result.deleted_count, 1);
+
+        let parent = memory_get_full(&pool, "alice", "parent", None)
+            .await.unwrap().expect("parent must survive");
+        let refs: Vec<String> = serde_json::from_str(&parent.related_to).unwrap();
+        assert_eq!(refs, vec!["carol/keeper"], "orphan ref bob/child must be removed");
     }
 }
