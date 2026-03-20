@@ -738,6 +738,7 @@ fn build_tools_list() -> Value {
                     "agent": {"type": "string"},
                     "limit": {"type": "number"},
                     "since": {"type": "string"},
+                    "until": {"type": "string"},
                     "offset": {"type": "number"}
                 }
             }
@@ -1119,5 +1120,43 @@ mod tests {
         let err = resp.error.expect("expected error");
         assert_eq!(err.code, -32601);
         assert!(err.message.contains("bogus/method"));
+    }
+
+    #[tokio::test]
+    async fn state_event_query_schema_includes_until() {
+        let tools = build_tools_list();
+        let arr = tools.as_array().expect("tools list must be array");
+        let tool = arr
+            .iter()
+            .find(|t| t["name"] == "state_event_query")
+            .expect("state_event_query tool must exist");
+        let props = &tool["inputSchema"]["properties"];
+        assert!(
+            props.get("until").is_some(),
+            "state_event_query schema must declare 'until' property"
+        );
+    }
+
+    #[tokio::test]
+    async fn state_event_query_until_filters_events() {
+        let pool = make_pool().await;
+
+        dispatch_tool(
+            &pool,
+            "state_event_emit",
+            json!({"type": "ts.test", "agent": "a1", "payload": {}}),
+        )
+        .await
+        .unwrap();
+
+        let events = dispatch_tool(
+            &pool,
+            "state_event_query",
+            json!({"type": "ts.test", "until": "2000-01-01T00:00:00Z"}),
+        )
+        .await
+        .unwrap();
+        let arr = events.as_array().unwrap();
+        assert!(arr.is_empty(), "until in the past should exclude all events");
     }
 }
