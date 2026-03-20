@@ -128,12 +128,22 @@ pub async fn update_task_status(pool: &SqlitePool, id: &str, new_status: &str) -
     validate_task_transition(&task.status, new_status)?;
 
     let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?")
-        .bind(new_status)
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let result =
+        sqlx::query("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = ?")
+            .bind(new_status)
+            .bind(&now)
+            .bind(id)
+            .bind(&task.status)
+            .execute(pool)
+            .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(anyhow!(
+            "Task '{}' status changed concurrently (expected '{}', no longer matches)",
+            id,
+            task.status
+        ));
+    }
 
     get_task(pool, id)
         .await?

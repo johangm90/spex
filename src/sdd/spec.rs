@@ -191,13 +191,24 @@ pub async fn update_spec_status(
     validate_transition(&spec.status, new_status)?;
 
     let now = Utc::now().to_rfc3339();
-    sqlx::query("UPDATE specs SET status = ?, updated_at = ?, updated_by = ? WHERE id = ?")
-        .bind(new_status)
-        .bind(&now)
-        .bind(updated_by)
-        .bind(id)
-        .execute(pool)
-        .await?;
+    let result = sqlx::query(
+        "UPDATE specs SET status = ?, updated_at = ?, updated_by = ? WHERE id = ? AND status = ?",
+    )
+    .bind(new_status)
+    .bind(&now)
+    .bind(updated_by)
+    .bind(id)
+    .bind(&spec.status)
+    .execute(pool)
+    .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(anyhow!(
+            "Spec '{}' status changed concurrently (expected '{}', no longer matches)",
+            id,
+            spec.status
+        ));
+    }
 
     get_spec(pool, id)
         .await?
