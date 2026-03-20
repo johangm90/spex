@@ -184,16 +184,47 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let specs = list_specs(pool, None, None).await?;
             let tasks = list_tasks(pool, None, None, None).await?;
             let events = query_events(pool, None, None, None, Some(10), None, None, None).await?;
+            let artifacts = query_artifacts(pool, None, None, None, None).await?;
             let project_dir = detect_project_dir();
             let config_source = detect_config_source(&project_dir);
+
+            let mut agents: Vec<String> = Vec::new();
+            for spec in &specs {
+                if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&spec.agents) {
+                    for agent in parsed {
+                        if !agents.contains(&agent) {
+                            agents.push(agent);
+                        }
+                    }
+                }
+            }
+            for task in &tasks {
+                if !agents.contains(&task.agent) {
+                    agents.push(task.agent.clone());
+                }
+            }
+
+            let agent_param = args.get("agent").and_then(|v| v.as_str());
+            let spec_param = args.get("spec").and_then(|v| v.as_str());
+            let memory_summary = if let Some(agent) = agent_param {
+                Some(memory_stats(pool, agent, spec_param).await?)
+            } else {
+                None
+            };
 
             let mut payload = json!({
                 "specs": specs,
                 "tasks": tasks,
                 "recent_events": events,
+                "artifacts": artifacts,
+                "agents": agents,
                 "project_dir": project_dir,
                 "config_source": config_source
             });
+
+            if let Some(ms) = memory_summary {
+                payload["memory_stats"] = ms;
+            }
 
             if payload
                 .get("config_source")
@@ -652,7 +683,10 @@ fn build_tools_list() -> Value {
             "description": "Returns a full project overview: constitution, specs, tasks, and recent events.",
             "inputSchema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "agent": {"type": "string", "description": "Include memory_stats for this agent"},
+                    "spec": {"type": "string", "description": "Scope memory_stats to this spec (requires agent)"}
+                }
             }
         },
         {
@@ -968,6 +1002,25 @@ mod tests {
             result.get("recent_events").is_some(),
             "missing 'recent_events' key"
         );
+        assert!(result.get("artifacts").is_some(), "missing 'artifacts' key");
+        assert!(result.get("agents").is_some(), "missing 'agents' key");
+        assert!(
+            result.get("memory_stats").is_none(),
+            "memory_stats must be absent without agent param"
+        );
+    }
+
+    #[tokio::test]
+    async fn state_snapshot_includes_memory_stats_when_agent_given() {
+        let pool = make_pool().await;
+        memory_set(&pool, "alice", "k1", "v1", None, Some("decision"), None, None)
+            .await
+            .unwrap();
+        let result = dispatch_tool(&pool, "state_snapshot", json!({"agent": "alice"}))
+            .await
+            .unwrap();
+        let stats = result.get("memory_stats").expect("missing memory_stats");
+        assert_eq!(stats["total"], 1);
     }
 
     #[tokio::test]
