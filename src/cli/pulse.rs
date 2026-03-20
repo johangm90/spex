@@ -14,7 +14,7 @@ pub async fn cmd_pulse(pool: &SqlitePool, since: Option<&str>, until: Option<&st
     } else {
         Some(10)
     };
-    let recent_events = query_events(pool, None, None, None, limit, since, until).await?;
+    let recent_events = query_events(pool, None, None, None, limit, since, until, None).await?;
 
     println!(
         "{}",

@@ -9,9 +9,10 @@ pub async fn cmd_trace(
     spec: Option<&str>,
     agent: Option<&str>,
     limit: Option<i64>,
+    offset: Option<i64>,
 ) -> Result<()> {
     let limit = limit.unwrap_or(50);
-    let events = query_events(pool, None, spec, agent, Some(limit), None, None).await?;
+    let events = query_events(pool, None, spec, agent, Some(limit), None, None, offset).await?;
 
     if events.is_empty() {
         println!("{}", "No events found.".dimmed());

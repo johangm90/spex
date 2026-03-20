@@ -94,6 +94,8 @@ pub enum Commands {
         agent: Option<String>,
         #[arg(long)]
         limit: Option<i64>,
+        #[arg(long)]
+        offset: Option<i64>,
     },
 
     /// MCP server commands
@@ -343,9 +345,9 @@ async fn main() -> Result<()> {
             cmd_pulse(&pool, since.as_deref(), until.as_deref()).await?;
         }
 
-        Commands::Trace { spec, agent, limit } => {
+        Commands::Trace { spec, agent, limit, offset } => {
             let pool = open_project_db().await?;
-            cmd_trace(&pool, spec.as_deref(), agent.as_deref(), limit).await?;
+            cmd_trace(&pool, spec.as_deref(), agent.as_deref(), limit, offset).await?;
         }
 
         Commands::Mcp { cmd } => match cmd {

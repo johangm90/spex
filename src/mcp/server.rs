@@ -183,7 +183,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
         "state_snapshot" => {
             let specs = list_specs(pool, None, None).await?;
             let tasks = list_tasks(pool, None, None, None).await?;
-            let events = query_events(pool, None, None, None, Some(10), None, None).await?;
+            let events = query_events(pool, None, None, None, Some(10), None, None, None).await?;
             let project_dir = detect_project_dir();
             let config_source = detect_config_source(&project_dir);
 
@@ -400,6 +400,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let limit = args.get("limit").and_then(|v| v.as_i64());
             let since = args.get("since").and_then(|v| v.as_str());
             let until = args.get("until").and_then(|v| v.as_str());
+            let offset = args.get("offset").and_then(|v| v.as_i64());
 
             let events = query_events(
                 pool,
@@ -409,6 +410,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 limit,
                 since,
                 until,
+                offset,
             )
             .await?;
             Ok(json!(events))
@@ -727,7 +729,8 @@ fn build_tools_list() -> Value {
                     "spec": {"type": "string"},
                     "agent": {"type": "string"},
                     "limit": {"type": "number"},
-                    "since": {"type": "string"}
+                    "since": {"type": "string"},
+                    "offset": {"type": "number"}
                 }
             }
         },
