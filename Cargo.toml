@@ -24,10 +24,7 @@ thiserror = "1"
 colored = "2"
 dirs = "5"
 include_dir = { version = "0.7", features = ["glob"] }
-minijinja = { version = "2", features = ["loader"] }
 inquire = "0.7"
-indicatif = "0.17"
-toml = "0.8"
 
 [dev-dependencies]
 tempfile = "3"
