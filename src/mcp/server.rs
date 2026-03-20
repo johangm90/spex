@@ -434,7 +434,23 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let ttl_seconds = args.get("ttl_seconds").and_then(|v| v.as_i64());
             let related_to = args
                 .get("related_to")
-                .map(|v| v.to_string());
+                .map(|v| {
+                    let arr = v.as_array().ok_or_else(|| {
+                        anyhow::anyhow!("related_to must be a JSON array of strings")
+                    })?;
+                    for (i, item) in arr.iter().enumerate() {
+                        let s = item.as_str().ok_or_else(|| {
+                            anyhow::anyhow!("related_to[{i}] must be a string")
+                        })?;
+                        if !s.contains('/') {
+                            anyhow::bail!(
+                                "related_to[{i}] must be in 'agent/key' format, got: {s}"
+                            );
+                        }
+                    }
+                    Ok::<String, anyhow::Error>(v.to_string())
+                })
+                .transpose()?;
 
             memory_set(pool, agent, key, &value, spec, mem_type, ttl_seconds, related_to.as_deref()).await?;
             Ok(json!({"ok": true}))
@@ -1181,5 +1197,45 @@ mod tests {
         .unwrap();
         let arr = events.as_array().unwrap();
         assert!(arr.is_empty(), "until in the past should exclude all events");
+    }
+
+    #[tokio::test]
+    async fn memory_set_rejects_non_array_related_to() {
+        let pool = make_pool().await;
+        let result = dispatch_tool(
+            &pool,
+            "memory_set",
+            json!({"agent": "a", "key": "k", "value": "v", "related_to": "not-an-array"}),
+        )
+        .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("must be a JSON array"), "got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn memory_set_rejects_invalid_related_to_format() {
+        let pool = make_pool().await;
+        let result = dispatch_tool(
+            &pool,
+            "memory_set",
+            json!({"agent": "a", "key": "k", "value": "v", "related_to": ["no-slash"]}),
+        )
+        .await;
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("agent/key"), "got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn memory_set_accepts_valid_related_to() {
+        let pool = make_pool().await;
+        let result = dispatch_tool(
+            &pool,
+            "memory_set",
+            json!({"agent": "a", "key": "k", "value": "v", "related_to": ["bob/decision-1", "carol/pattern-2"]}),
+        )
+        .await;
+        assert!(result.is_ok(), "valid related_to must be accepted");
     }
 }
