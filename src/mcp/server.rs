@@ -10,8 +10,8 @@ use crate::sdd::{
     artifact::{query_artifacts, register_artifact},
     event::{emit_event, query_events},
     memory::{
-        memory_context, memory_delete, memory_get_full, memory_list, memory_search, memory_set,
-        memory_stats,
+        memory_context, memory_delete, memory_find_referencing, memory_get_full, memory_list,
+        memory_search, memory_set, memory_stats,
     },
     spec::{
         create_spec, get_spec, list_specs, update_spec_ac, update_spec_agents, update_spec_status,
@@ -614,6 +614,17 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(entries))
         }
 
+        "memory_find_related" => {
+            let target = args
+                .get("target")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing required field: target"))?;
+            let spec = args.get("spec").and_then(|v| v.as_str());
+
+            let entries = memory_find_referencing(pool, target, spec).await?;
+            Ok(json!(entries))
+        }
+
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }
@@ -879,6 +890,18 @@ fn build_tools_list() -> Value {
                 },
                 "required": ["agent"]
             }
+        },
+        {
+            "name": "memory_find_related",
+            "description": "Find memory entries whose related_to field references a given target. Target format: 'agent/key'.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "description": "Target reference in 'agent/key' format"},
+                    "spec": {"type": "string", "description": "Optional scope for the search"}
+                },
+                "required": ["target"]
+            }
         }
     ])
 }
@@ -1083,7 +1106,7 @@ mod tests {
         let resp = handle_request(&pool, req).await.unwrap();
         let result = resp.result.expect("expected result");
         let tools = result["tools"].as_array().expect("tools must be array");
-        assert_eq!(tools.len(), 19, "expected 19 tools, got {}", tools.len());
+        assert_eq!(tools.len(), 20, "expected 20 tools, got {}", tools.len());
     }
 
     #[tokio::test]

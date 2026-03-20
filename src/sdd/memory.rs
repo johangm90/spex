@@ -309,6 +309,34 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
     }))
 }
 
+pub async fn memory_find_referencing(
+    pool: &SqlitePool,
+    target: &str,
+    spec: Option<&str>,
+) -> Result<Vec<Memory>> {
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT m.id, m.agent, m.key, m.value, m.spec, m.updated_at, m.type, \
+                m.deleted_at, m.expires_at, m.access_count, m.last_accessed_at, \
+                m.revision_count, m.related_to \
+         FROM memory m JOIN json_each(m.related_to) j ON j.type = 'text' \
+         WHERE j.value = ",
+    );
+    qb.push_bind(target);
+    qb.push(
+        " AND m.deleted_at IS NULL \
+         AND (m.expires_at IS NULL OR m.expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+    );
+    if let Some(s) = spec {
+        qb.push(" AND (m.spec = ");
+        qb.push_bind(s);
+        qb.push(" OR m.spec = '*')");
+    }
+    qb.push(" ORDER BY m.updated_at DESC");
+
+    let rows: Vec<Memory> = qb.build_query_as().fetch_all(pool).await?;
+    Ok(rows)
+}
+
 #[derive(Debug, Serialize)]
 pub struct GcResult {
     pub deleted_count: u64,
@@ -933,5 +961,60 @@ mod tests {
             ctx[0].key, "recent",
             "recent entry with 1 access must beat stale entry with 10 accesses from years ago"
         );
+    }
+
+    #[tokio::test]
+    async fn find_referencing_returns_entries_that_link_to_target() {
+        let pool = make_pool().await;
+
+        memory_set(
+            &pool, "alice", "parent", "v", None, None, None,
+            Some(r#"["bob/child"]"#),
+        ).await.unwrap();
+        memory_set(
+            &pool, "bob", "child", "v", None, None, None, None,
+        ).await.unwrap();
+        memory_set(
+            &pool, "carol", "other", "v", None, None, None,
+            Some(r#"["bob/child","alice/parent"]"#),
+        ).await.unwrap();
+
+        let refs = memory_find_referencing(&pool, "bob/child", None).await.unwrap();
+        let keys: Vec<&str> = refs.iter().map(|m| m.key.as_str()).collect();
+        assert!(keys.contains(&"parent"), "alice/parent references bob/child");
+        assert!(keys.contains(&"other"), "carol/other references bob/child");
+        assert_eq!(refs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn find_referencing_excludes_deleted_entries() {
+        let pool = make_pool().await;
+
+        memory_set(
+            &pool, "alice", "linker", "v", None, None, None,
+            Some(r#"["bob/target"]"#),
+        ).await.unwrap();
+        memory_delete(&pool, "alice", "linker", None).await.unwrap();
+
+        let refs = memory_find_referencing(&pool, "bob/target", None).await.unwrap();
+        assert!(refs.is_empty(), "deleted entries must be excluded");
+    }
+
+    #[tokio::test]
+    async fn find_referencing_respects_spec_filter() {
+        let pool = make_pool().await;
+
+        memory_set(
+            &pool, "alice", "s1-link", "v", Some("SPEC-001"), None, None,
+            Some(r#"["bob/target"]"#),
+        ).await.unwrap();
+        memory_set(
+            &pool, "alice", "s2-link", "v", Some("SPEC-002"), None, None,
+            Some(r#"["bob/target"]"#),
+        ).await.unwrap();
+
+        let refs = memory_find_referencing(&pool, "bob/target", Some("SPEC-001")).await.unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0].key, "s1-link");
     }
 }
