@@ -586,6 +586,20 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(stats)
         }
 
+        "memory_list" => {
+            let agent = args
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: agent"))?;
+            let spec = args.get("spec").and_then(|v| v.as_str());
+            let mem_type = args.get("type").and_then(|v| v.as_str());
+            let limit = args.get("limit").and_then(|v| v.as_i64());
+            let offset = args.get("offset").and_then(|v| v.as_i64());
+
+            let entries = memory_list(pool, agent, spec, mem_type, limit, offset).await?;
+            Ok(json!(entries))
+        }
+
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }
@@ -828,6 +842,21 @@ fn build_tools_list() -> Value {
                 },
                 "required": ["agent"]
             }
+        },
+        {
+            "name": "memory_list",
+            "description": "List memory entries for an agent with optional filters. Returns full Memory objects including metadata.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": {"type": "string"},
+                    "spec": {"type": "string"},
+                    "type": {"type": "string", "enum": ["decision","architecture","bugfix","pattern","config","discovery","learning"]},
+                    "limit": {"type": "integer", "default": 100},
+                    "offset": {"type": "integer", "default": 0}
+                },
+                "required": ["agent"]
+            }
         }
     ])
 }
@@ -1032,7 +1061,7 @@ mod tests {
         let resp = handle_request(&pool, req).await.unwrap();
         let result = resp.result.expect("expected result");
         let tools = result["tools"].as_array().expect("tools must be array");
-        assert_eq!(tools.len(), 18, "expected 18 tools, got {}", tools.len());
+        assert_eq!(tools.len(), 19, "expected 19 tools, got {}", tools.len());
     }
 
     #[tokio::test]
