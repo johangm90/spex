@@ -65,19 +65,6 @@ pub async fn memory_set(
     Ok(())
 }
 
-/// Convenience wrapper: returns only the value string (no access tracking metadata).
-/// Use `memory_get_full` when you need the complete Memory struct with access tracking.
-#[allow(dead_code)]
-pub async fn memory_get(
-    pool: &SqlitePool,
-    agent: &str,
-    key: &str,
-    spec: Option<&str>,
-) -> Result<Option<String>> {
-    let row = memory_get_full(pool, agent, key, spec).await?;
-    Ok(row.map(|m| m.value))
-}
-
 /// Retrieve a full Memory row, filtering deleted and expired entries.
 /// On a hit, bumps access_count and last_accessed_at.
 pub async fn memory_get_full(
@@ -132,36 +119,40 @@ pub async fn memory_get_full(
     Ok(row)
 }
 
-/// IMP-007: always scope to `spec` when provided to prevent cross-spec contamination.
-pub async fn memory_get_all(
+pub async fn memory_list(
     pool: &SqlitePool,
     agent: &str,
     spec: Option<&str>,
-) -> Result<Vec<(String, String)>> {
-    let rows: Vec<(String, String)> = if let Some(spec) = spec {
-        sqlx::query_as(
-            "SELECT key, value FROM memory \
-             WHERE agent = ? AND spec = ? \
-               AND deleted_at IS NULL \
-               AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-             ORDER BY key",
-        )
-        .bind(agent)
-        .bind(spec)
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query_as(
-            "SELECT key, value FROM memory \
-             WHERE agent = ? \
-               AND deleted_at IS NULL \
-               AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-             ORDER BY key",
-        )
-        .bind(agent)
-        .fetch_all(pool)
-        .await?
-    };
+    mem_type: Option<&str>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<Memory>> {
+    let limit = limit.unwrap_or(100);
+    let offset = offset.unwrap_or(0);
+
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
+                access_count, last_accessed_at, revision_count \
+         FROM memory WHERE agent = ",
+    );
+    qb.push_bind(agent);
+    if let Some(s) = spec {
+        qb.push(" AND spec = ");
+        qb.push_bind(s);
+    }
+    if let Some(t) = mem_type {
+        qb.push(" AND type = ");
+        qb.push_bind(t);
+    }
+    qb.push(
+        " AND deleted_at IS NULL \
+           AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         ORDER BY key LIMIT ",
+    );
+    qb.push_bind(limit);
+    qb.push(" OFFSET ");
+    qb.push_bind(offset);
+    let rows: Vec<Memory> = qb.build_query_as::<Memory>().fetch_all(pool).await?;
 
     Ok(rows)
 }
@@ -393,10 +384,10 @@ mod tests {
             "deleted entry must not appear in search results"
         );
 
-        let all = memory_get_all(&pool, "alice", None).await.unwrap();
+        let all = memory_list(&pool, "alice", None, None, None, None).await.unwrap();
         assert!(
-            !all.iter().any(|(k, _)| k == "foo"),
-            "deleted entry must not appear in memory_get_all"
+            !all.iter().any(|m| m.key == "foo"),
+            "deleted entry must not appear in memory_list"
         );
     }
 

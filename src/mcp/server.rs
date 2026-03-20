@@ -10,7 +10,7 @@ use crate::sdd::{
     artifact::{query_artifacts, register_artifact},
     event::{emit_event, query_events},
     memory::{
-        memory_context, memory_delete, memory_get_all, memory_get_full, memory_search, memory_set,
+        memory_context, memory_delete, memory_get_full, memory_list, memory_search, memory_set,
         memory_stats,
     },
     spec::{
@@ -456,10 +456,10 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                     Ok(json!({"value": null}))
                 }
             } else {
-                let entries = memory_get_all(pool, agent, spec).await?;
+                let entries = memory_list(pool, agent, spec, None, None, None).await?;
                 let entries_obj: Vec<Value> = entries
                     .into_iter()
-                    .map(|(k, v)| json!({"key": k, "value": parse_memory_value(&v)}))
+                    .map(|m| json!({"key": m.key, "value": parse_memory_value(&m.value)}))
                     .collect();
                 Ok(json!({"entries": entries_obj}))
             }
