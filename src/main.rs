@@ -143,6 +143,10 @@ pub enum SpecCmd {
     List {
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        limit: Option<i64>,
+        #[arg(long)]
+        offset: Option<i64>,
     },
     /// Show spec details
     Show { id: String },
@@ -185,6 +189,10 @@ pub enum TaskCmd {
         spec_id: Option<String>,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        limit: Option<i64>,
+        #[arg(long)]
+        offset: Option<i64>,
     },
 }
 
@@ -286,7 +294,7 @@ async fn main() -> Result<()> {
                 SpecCmd::Approve { id } => cmd_spec_approve(&pool, &id).await?,
                 SpecCmd::Start { id } => cmd_spec_start(&pool, &id).await?,
                 SpecCmd::Done { id } => cmd_spec_done(&pool, &id).await?,
-                SpecCmd::List { json } => cmd_spec_list(&pool, json).await?,
+                SpecCmd::List { json, limit, offset } => cmd_spec_list(&pool, json, limit, offset).await?,
                 SpecCmd::Show { id } => cmd_spec_show(&pool, &id).await?,
             }
         }
@@ -324,8 +332,8 @@ async fn main() -> Result<()> {
                 TaskCmd::Start { id } => cmd_task_start(&pool, &id).await?,
                 TaskCmd::Done { id } => cmd_task_done(&pool, &id).await?,
                 TaskCmd::Fail { id } => cmd_task_fail(&pool, &id).await?,
-                TaskCmd::List { spec_id, json } => {
-                    cmd_task_list(&pool, spec_id.as_deref(), json).await?
+                TaskCmd::List { spec_id, json, limit, offset } => {
+                    cmd_task_list(&pool, spec_id.as_deref(), json, limit, offset).await?
                 }
             }
         }

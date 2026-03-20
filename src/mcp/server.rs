@@ -181,8 +181,8 @@ async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRp
 async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Value> {
     match name {
         "state_snapshot" => {
-            let specs = list_specs(pool).await?;
-            let tasks = list_tasks(pool, None).await?;
+            let specs = list_specs(pool, None, None).await?;
+            let tasks = list_tasks(pool, None, None, None).await?;
             let events = query_events(pool, None, None, None, Some(10), None, None).await?;
             let project_dir = detect_project_dir();
             let config_source = detect_config_source(&project_dir);
@@ -215,7 +215,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 let spec = get_spec(pool, id).await?;
                 Ok(json!(spec))
             } else {
-                let specs = list_specs(pool).await?;
+                let limit = args.get("limit").and_then(|v| v.as_i64());
+                let offset = args.get("offset").and_then(|v| v.as_i64());
+                let specs = list_specs(pool, limit, offset).await?;
                 Ok(json!(specs))
             }
         }
@@ -310,7 +312,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 let task = get_task(pool, id).await?;
                 Ok(json!(task))
             } else {
-                let tasks = list_tasks(pool, spec).await?;
+                let limit = args.get("limit").and_then(|v| v.as_i64());
+                let offset = args.get("offset").and_then(|v| v.as_i64());
+                let tasks = list_tasks(pool, spec, limit, offset).await?;
                 Ok(json!(tasks))
             }
         }
@@ -620,7 +624,9 @@ fn build_tools_list() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "id": {"type": "string", "description": "Slice/Spec ID (optional; omit to list all)"}
+                    "id": {"type": "string", "description": "Slice/Spec ID (optional; omit to list all)"},
+                    "limit": {"type": "integer", "description": "Max results when listing all (omit for no limit)"},
+                    "offset": {"type": "integer", "description": "Skip N results when listing all (requires limit)"}
                 }
             }
         },
@@ -662,7 +668,9 @@ fn build_tools_list() -> Value {
                 "type": "object",
                 "properties": {
                     "id": {"type": "string"},
-                    "spec": {"type": "string"}
+                    "spec": {"type": "string"},
+                    "limit": {"type": "integer", "description": "Max results when listing (omit for no limit)"},
+                    "offset": {"type": "integer", "description": "Skip N results when listing (requires limit)"}
                 }
             }
         },

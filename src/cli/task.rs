@@ -90,8 +90,8 @@ pub async fn cmd_task_fail(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_task_list(pool: &SqlitePool, spec_id: Option<&str>, json: bool) -> Result<()> {
-    let tasks = list_tasks(pool, spec_id).await?;
+pub async fn cmd_task_list(pool: &SqlitePool, spec_id: Option<&str>, json: bool, limit: Option<i64>, offset: Option<i64>) -> Result<()> {
+    let tasks = list_tasks(pool, spec_id, limit, offset).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&tasks)?);

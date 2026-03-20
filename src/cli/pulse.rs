@@ -7,8 +7,8 @@ use crate::sdd::{event::query_events, spec::list_specs, task::list_tasks};
 use super::util::colorize_status;
 
 pub async fn cmd_pulse(pool: &SqlitePool, since: Option<&str>, until: Option<&str>) -> Result<()> {
-    let specs = list_specs(pool).await?;
-    let all_tasks = list_tasks(pool, None).await?;
+    let specs = list_specs(pool, None, None).await?;
+    let all_tasks = list_tasks(pool, None, None, None).await?;
     let limit = if since.is_some() || until.is_some() {
         None
     } else {

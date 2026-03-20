@@ -57,8 +57,8 @@ pub async fn cmd_spec_done(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_spec_list(pool: &SqlitePool, json: bool) -> Result<()> {
-    let specs = list_specs(pool).await?;
+pub async fn cmd_spec_list(pool: &SqlitePool, json: bool, limit: Option<i64>, offset: Option<i64>) -> Result<()> {
+    let specs = list_specs(pool, limit, offset).await?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&specs)?);
@@ -139,7 +139,7 @@ pub async fn cmd_spec_show(pool: &SqlitePool, id: &str) -> Result<()> {
     }
 
     println!();
-    let tasks = list_tasks(pool, Some(id)).await?;
+    let tasks = list_tasks(pool, Some(id), None, None).await?;
     if tasks.is_empty() {
         println!(
             "  {}",

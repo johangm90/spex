@@ -245,7 +245,7 @@ async fn check_stuck_specs() -> CheckResult {
             status: CheckStatus::Warn,
             message: "Cannot open project DB to check.".to_string(),
         },
-        Ok(pool) => match crate::sdd::spec::list_specs(&pool).await {
+        Ok(pool) => match crate::sdd::spec::list_specs(&pool, None, None).await {
             Err(e) => CheckResult {
                 name: "Stuck specs".to_string(),
                 status: CheckStatus::Fail,

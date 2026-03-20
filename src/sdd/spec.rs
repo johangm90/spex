@@ -25,7 +25,7 @@ impl SpecStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Spec {
     pub id: String,
     pub title: String,
@@ -108,46 +108,27 @@ pub async fn get_spec(pool: &SqlitePool, id: &str) -> Result<Option<Spec>> {
     ))
 }
 
-pub async fn list_specs(pool: &SqlitePool) -> Result<Vec<Spec>> {
-    let rows = sqlx::query_as::<_, (String, String, String, String, String, String, i64, i64, String, String, Option<String>)>(
-        "SELECT id, title, status, priority, depends_on, agents, ac_total, ac_passed, created_at, updated_at, updated_by \
+pub async fn list_specs(
+    pool: &SqlitePool,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<Spec>> {
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT id, title, status, priority, depends_on, agents, ac_total, ac_passed, \
+                created_at, updated_at, updated_by \
          FROM specs ORDER BY id",
-    )
-    .fetch_all(pool)
-    .await?;
+    );
+    if let Some(lim) = limit {
+        qb.push(" LIMIT ");
+        qb.push_bind(lim);
+        if let Some(off) = offset {
+            qb.push(" OFFSET ");
+            qb.push_bind(off);
+        }
+    }
 
-    Ok(rows
-        .into_iter()
-        .map(
-            |(
-                id,
-                title,
-                status,
-                priority,
-                depends_on,
-                agents,
-                ac_total,
-                ac_passed,
-                created_at,
-                updated_at,
-                updated_by,
-            )| {
-                Spec {
-                    id,
-                    title,
-                    status,
-                    priority,
-                    depends_on,
-                    agents,
-                    ac_total,
-                    ac_passed,
-                    created_at,
-                    updated_at,
-                    updated_by,
-                }
-            },
-        )
-        .collect())
+    let specs: Vec<Spec> = qb.build_query_as().fetch_all(pool).await?;
+    Ok(specs)
 }
 
 /// Validate state machine transition.
@@ -300,7 +281,7 @@ mod tests {
     #[tokio::test]
     async fn list_specs_empty_db_returns_empty_vec() {
         let pool = make_pool().await;
-        let specs = list_specs(&pool).await.unwrap();
+        let specs = list_specs(&pool, None, None).await.unwrap();
         assert!(
             specs.is_empty(),
             "list_specs must return empty vec on an empty DB"
@@ -317,7 +298,7 @@ mod tests {
             .await
             .unwrap();
 
-        let specs = list_specs(&pool).await.unwrap();
+        let specs = list_specs(&pool, None, None).await.unwrap();
         assert_eq!(specs.len(), 2, "list_specs must return 2 specs");
         assert_eq!(
             specs[0].id, "SPEC-A",

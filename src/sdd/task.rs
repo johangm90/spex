@@ -23,7 +23,7 @@ impl TaskStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Task {
     pub id: String,
     pub spec: String,
@@ -91,42 +91,34 @@ pub async fn get_task(pool: &SqlitePool, id: &str) -> Result<Option<Task>> {
     ))
 }
 
-pub async fn list_tasks(pool: &SqlitePool, spec_filter: Option<&str>) -> Result<Vec<Task>> {
-    let rows = if let Some(spec) = spec_filter {
-        sqlx::query_as::<_, (String, String, String, String, String, String, Option<String>, String, String)>(
-            "SELECT id, spec, title, agent, status, inputs, output_artifact, created_at, updated_at \
-             FROM tasks WHERE spec = ? ORDER BY id",
-        )
-        .bind(spec)
-        .fetch_all(pool)
-        .await?
+pub async fn list_tasks(
+    pool: &SqlitePool,
+    spec_filter: Option<&str>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<Vec<Task>> {
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT id, spec, title, agent, status, inputs, output_artifact, created_at, updated_at \
+         FROM tasks",
+    );
+    if let Some(spec) = spec_filter {
+        qb.push(" WHERE spec = ");
+        qb.push_bind(spec);
+        qb.push(" ORDER BY id");
     } else {
-        sqlx::query_as::<_, (String, String, String, String, String, String, Option<String>, String, String)>(
-            "SELECT id, spec, title, agent, status, inputs, output_artifact, created_at, updated_at \
-             FROM tasks ORDER BY spec, id",
-        )
-        .fetch_all(pool)
-        .await?
-    };
+        qb.push(" ORDER BY spec, id");
+    }
+    if let Some(lim) = limit {
+        qb.push(" LIMIT ");
+        qb.push_bind(lim);
+        if let Some(off) = offset {
+            qb.push(" OFFSET ");
+            qb.push_bind(off);
+        }
+    }
 
-    Ok(rows
-        .into_iter()
-        .map(
-            |(id, spec, title, agent, status, inputs, output_artifact, created_at, updated_at)| {
-                Task {
-                    id,
-                    spec,
-                    title,
-                    agent,
-                    status,
-                    inputs,
-                    output_artifact,
-                    created_at,
-                    updated_at,
-                }
-            },
-        )
-        .collect())
+    let tasks: Vec<Task> = qb.build_query_as().fetch_all(pool).await?;
+    Ok(tasks)
 }
 
 fn validate_task_transition(from: &str, to: &str) -> Result<()> {
@@ -263,7 +255,7 @@ mod tests {
             .await
             .unwrap();
 
-        let all = list_tasks(&pool, None).await.unwrap();
+        let all = list_tasks(&pool, None, None, None).await.unwrap();
         assert_eq!(all.len(), 2, "list_tasks with no filter must return all 2 tasks");
     }
 
@@ -288,7 +280,7 @@ mod tests {
             .await
             .unwrap();
 
-        let filtered = list_tasks(&pool, Some("SPEC-001")).await.unwrap();
+        let filtered = list_tasks(&pool, Some("SPEC-001"), None, None).await.unwrap();
         assert_eq!(filtered.len(), 2, "spec filter must return only 2 tasks for SPEC-001");
         assert!(
             filtered.iter().all(|t| t.spec == "SPEC-001"),

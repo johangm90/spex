@@ -112,7 +112,7 @@ pub async fn cmd_plan_show(pool: &SqlitePool, spec_id: &str) -> Result<()> {
     println!("  Status: {}", colorize_status(&spec.status));
     println!();
 
-    let tasks = list_tasks(pool, Some(spec_id)).await?;
+    let tasks = list_tasks(pool, Some(spec_id), None, None).await?;
 
     if tasks.is_empty() {
         println!(
