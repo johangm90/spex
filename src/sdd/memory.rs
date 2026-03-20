@@ -319,6 +319,64 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
     }))
 }
 
+#[derive(Debug, Serialize)]
+pub struct GcResult {
+    pub deleted_count: u64,
+    pub expired_count: u64,
+    pub sample_keys: Vec<String>,
+}
+
+pub async fn memory_gc(pool: &SqlitePool, dry_run: bool) -> Result<GcResult> {
+    let soft_deleted: Vec<(String, String)> = sqlx::query_as(
+        "SELECT agent, key FROM memory WHERE deleted_at IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let expired: Vec<(String, String)> = sqlx::query_as(
+        "SELECT agent, key FROM memory \
+         WHERE expires_at IS NOT NULL \
+           AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now') \
+           AND deleted_at IS NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let deleted_count = soft_deleted.len() as u64;
+    let expired_count = expired.len() as u64;
+
+    let sample_keys: Vec<String> = soft_deleted
+        .iter()
+        .chain(expired.iter())
+        .take(10)
+        .map(|(agent, key)| format!("{}/{}", agent, key))
+        .collect();
+
+    if !dry_run && (deleted_count > 0 || expired_count > 0) {
+        sqlx::query("DELETE FROM memory WHERE deleted_at IS NOT NULL")
+            .execute(pool)
+            .await?;
+
+        sqlx::query(
+            "DELETE FROM memory \
+             WHERE expires_at IS NOT NULL \
+               AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("INSERT INTO memory_fts(memory_fts) VALUES ('rebuild')")
+            .execute(pool)
+            .await?;
+    }
+
+    Ok(GcResult {
+        deleted_count,
+        expired_count,
+        sample_keys,
+    })
+}
+
 // ─── Integration Tests (MEMS-001, AC1–AC7) ───────────────────────────────────
 
 #[cfg(test)]
@@ -570,5 +628,113 @@ mod tests {
         assert_eq!(resurrected.type_.as_deref(), Some("pattern"));
         assert_eq!(resurrected.access_count, 0, "access_count must reset on resurrect");
         assert!(resurrected.deleted_at.is_none(), "deleted_at must be cleared");
+    }
+
+    #[tokio::test]
+    async fn gc_removes_soft_deleted() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "keep", "v", None, None, None)
+            .await
+            .unwrap();
+        memory_set(&pool, "alice", "trash", "v", None, None, None)
+            .await
+            .unwrap();
+        memory_delete(&pool, "alice", "trash", None).await.unwrap();
+
+        let result = memory_gc(&pool, false).await.unwrap();
+        assert_eq!(result.deleted_count, 1);
+        assert_eq!(result.expired_count, 0);
+        assert!(result.sample_keys.contains(&"alice/trash".to_string()));
+
+        let row: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM memory WHERE agent = 'alice' AND key = 'trash'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row.0, 0, "hard-deleted row must be gone");
+
+        let kept = memory_get_full(&pool, "alice", "keep", None)
+            .await
+            .unwrap();
+        assert!(kept.is_some(), "non-deleted entry must survive GC");
+    }
+
+    #[tokio::test]
+    async fn gc_removes_expired() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "fresh", "v", None, None, None)
+            .await
+            .unwrap();
+        memory_set(&pool, "alice", "stale", "v", None, None, Some(9999))
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "UPDATE memory SET expires_at = '2000-01-01T00:00:00.000Z' \
+             WHERE agent = 'alice' AND key = 'stale'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let result = memory_gc(&pool, false).await.unwrap();
+        assert_eq!(result.expired_count, 1);
+        assert!(result.sample_keys.contains(&"alice/stale".to_string()));
+
+        let row: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM memory WHERE agent = 'alice' AND key = 'stale'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row.0, 0, "expired row must be gone");
+    }
+
+    #[tokio::test]
+    async fn gc_dry_run_preserves_rows() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "trash", "v", None, None, None)
+            .await
+            .unwrap();
+        memory_delete(&pool, "alice", "trash", None).await.unwrap();
+
+        let result = memory_gc(&pool, true).await.unwrap();
+        assert_eq!(result.deleted_count, 1);
+
+        let row: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM memory WHERE agent = 'alice' AND key = 'trash'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, 1, "dry-run must not remove rows");
+    }
+
+    #[tokio::test]
+    async fn gc_preserves_fts_consistency() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "survives", "important data", None, None, None)
+            .await
+            .unwrap();
+        memory_set(&pool, "alice", "dies", "doomed data", None, None, None)
+            .await
+            .unwrap();
+        memory_delete(&pool, "alice", "dies", None).await.unwrap();
+
+        memory_gc(&pool, false).await.unwrap();
+
+        let results = memory_search(&pool, "alice", "important", None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key, "survives");
+
+        let ghost = memory_search(&pool, "alice", "doomed", None, None, None)
+            .await
+            .unwrap();
+        assert!(ghost.is_empty(), "GC'd entry must not appear in FTS results");
     }
 }

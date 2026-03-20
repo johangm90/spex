@@ -1,5 +1,6 @@
 pub mod doctor;
 pub mod mcp_cmd;
+pub mod memory_cmd;
 pub mod plan;
 pub mod pulse;
 pub mod skill_cmd;

@@ -11,6 +11,7 @@ use clap::{Parser, Subcommand};
 use cli::{
     doctor::cmd_doctor,
     mcp_cmd::{cmd_mcp_serve, cmd_mcp_setup},
+    memory_cmd::{cmd_memory_gc, cmd_memory_list, cmd_memory_search, cmd_memory_show},
     plan::{cmd_plan_build, cmd_plan_show},
     pulse::cmd_pulse,
     skill_cmd::{cmd_setup, cmd_skill_install, cmd_skill_list},
@@ -113,6 +114,12 @@ pub enum Commands {
         #[arg(long)]
         fix: bool,
     },
+
+    /// Manage agent memory entries
+    Memory {
+        #[command(subcommand)]
+        cmd: MemoryCmd,
+    },
 }
 
 // ─── Spec Subcommands ─────────────────────────────────────────────────────────
@@ -205,6 +212,45 @@ pub enum SkillCmd {
     },
     /// List installed skills
     List,
+}
+
+// ─── Memory Subcommands ───────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum MemoryCmd {
+    /// List memory entries for an agent
+    List {
+        #[arg(long)]
+        agent: String,
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long, name = "type")]
+        mem_type: Option<String>,
+        #[arg(long, default_value = "100")]
+        limit: Option<i64>,
+    },
+    /// Show a single memory entry
+    Show {
+        agent: String,
+        key: String,
+        #[arg(long)]
+        spec: Option<String>,
+    },
+    /// Full-text search across memory entries
+    Search {
+        query: String,
+        #[arg(long)]
+        agent: String,
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long, name = "type")]
+        mem_type: Option<String>,
+    },
+    /// Garbage-collect soft-deleted and expired entries
+    Gc {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -311,6 +357,34 @@ async fn main() -> Result<()> {
 
         Commands::Doctor { fix } => {
             cmd_doctor(fix).await?;
+        }
+
+        Commands::Memory { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                MemoryCmd::List {
+                    agent,
+                    spec,
+                    mem_type,
+                    limit,
+                } => {
+                    cmd_memory_list(&pool, &agent, spec.as_deref(), mem_type.as_deref(), limit)
+                        .await?
+                }
+                MemoryCmd::Show { agent, key, spec } => {
+                    cmd_memory_show(&pool, &agent, &key, spec.as_deref()).await?
+                }
+                MemoryCmd::Search {
+                    query,
+                    agent,
+                    spec,
+                    mem_type,
+                } => {
+                    cmd_memory_search(&pool, &query, &agent, spec.as_deref(), mem_type.as_deref())
+                        .await?
+                }
+                MemoryCmd::Gc { dry_run } => cmd_memory_gc(&pool, dry_run).await?,
+            }
         }
     }
 
