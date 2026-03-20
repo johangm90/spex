@@ -494,6 +494,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let task = args.get("task").and_then(|v| v.as_str());
             let path = args.get("path").and_then(|v| v.as_str());
             let description = args.get("description").and_then(|v| v.as_str());
+            let content_hash = args.get("content_hash").and_then(|v| v.as_str());
 
             let artifact = register_artifact(
                 pool,
@@ -504,6 +505,7 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 artifact_type,
                 path,
                 description,
+                content_hash,
             )
             .await?;
             Ok(json!(artifact))
@@ -782,7 +784,8 @@ fn build_tools_list() -> Value {
                     "type": {"type": "string"},
                     "task": {"type": "string"},
                     "path": {"type": "string"},
-                    "description": {"type": "string"}
+                    "description": {"type": "string"},
+                    "content_hash": {"type": "string", "description": "Optional content hash (e.g. SHA-256) for integrity verification"}
                 },
                 "required": ["id", "agent", "type"]
             }
