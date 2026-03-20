@@ -49,7 +49,10 @@ pub async fn memory_set(
            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), \
            revision_count = revision_count + 1, \
            type = COALESCE(excluded.type, type), \
-           expires_at = COALESCE(excluded.expires_at, expires_at)",
+           expires_at = COALESCE(excluded.expires_at, expires_at), \
+           deleted_at = NULL, \
+           access_count = 0, \
+           last_accessed_at = NULL",
     )
     .bind(agent)
     .bind(key)
@@ -655,5 +658,34 @@ mod tests {
             fourth.access_count, 3,
             "access_count must equal 3 after three reads (observed on the 4th read)"
         );
+    }
+
+    #[tokio::test]
+    async fn ac8_set_after_delete_resurrects_entry() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "ephemeral", "v1", None, Some("decision"), None)
+            .await
+            .unwrap();
+
+        let deleted = memory_delete(&pool, "alice", "ephemeral", None).await.unwrap();
+        assert!(deleted);
+
+        let gone = memory_get_full(&pool, "alice", "ephemeral", None).await.unwrap();
+        assert!(gone.is_none(), "soft-deleted entry must be invisible");
+
+        memory_set(&pool, "alice", "ephemeral", "v2", None, Some("pattern"), None)
+            .await
+            .unwrap();
+
+        let resurrected = memory_get_full(&pool, "alice", "ephemeral", None)
+            .await
+            .unwrap()
+            .expect("re-set entry must be visible again");
+
+        assert_eq!(resurrected.value, "v2");
+        assert_eq!(resurrected.type_.as_deref(), Some("pattern"));
+        assert_eq!(resurrected.access_count, 0, "access_count must reset on resurrect");
+        assert!(resurrected.deleted_at.is_none(), "deleted_at must be cleared");
     }
 }
