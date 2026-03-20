@@ -16,7 +16,7 @@
 
 - **Specs** are the unit of work — named feature slices with a human-gated lifecycle (`draft → approved → in_progress → done`).
 - **Agents** share state through an embedded **MCP (Model Context Protocol)** server backed by a local SQLite database at `.spex/state.db`.
-- **6 bundled AI agents** install in one command and work with [OpenCode](https://opencode.ai) out of the box. A single primary orchestrator (`spex-architect`) coordinates four focused subagents, plus a `skill-builder` that scaffolds custom agents for your team's stack.
+- **6 bundled AI agent files** install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs them to `~/.config/opencode/agents`. Separately, `skill-builder` scaffolds custom project skills for your team's stack under `~/.config/opencode/skills/<slug>/SKILL.md`.
 
 ---
 
@@ -90,18 +90,22 @@ Human approval is enforced by the CLI — no agent can skip it.
 |---------|-------------|
 | `spex new <NAME>` | Bootstrap a new project |
 | `spex init` | Initialise spex in an existing project |
-| `spex setup` | Install all bundled agent skills |
+| `spex setup` | Install bundled agents and write OpenCode MCP config |
 | `spex spec add <ID> <TITLE>` | Create a new spec |
 | `spex spec approve <ID>` | Human-approve a spec (required before agents can start) |
+| `spex spec start <ID>` / `spex spec done <ID>` | Move a spec through its lifecycle |
 | `spex spec list` | List all specs |
 | `spex spec show <ID>` | Show spec details and tasks |
 | `spex plan build <ID>` | Interactively add tasks to a spec |
+| `spex task add ...` / `spex task list` | Manage tasks within a spec |
 | `spex pulse` | Project status dashboard |
 | `spex trace` | Append-only domain event log |
-| `spex doctor` | Run 7 health checks |
-| `spex mcp serve` | Start the MCP stdio server (auto-started by OpenCode) |
+| `spex mcp serve` / `spex mcp setup` | Start the MCP server or write MCP config |
+| `spex skill install --all` / `spex skill list` | Install or list bundled agents |
+| `spex memory list ...` / `spex memory search ...` | Inspect agent memory entries |
+| `spex doctor` | Run health checks |
 
-Run `spex <command> --help` for full flags and options.
+Run `spex --help` or `spex <command> --help` for the current command surface and flags.
 
 ---
 

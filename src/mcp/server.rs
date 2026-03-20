@@ -17,7 +17,10 @@ use crate::sdd::{
         create_spec, get_spec, list_specs, update_spec_ac, update_spec_agents, update_spec_status,
         SpecStatus,
     },
-    task::{create_task, get_task, list_tasks, update_task_output_artifact, update_task_status, TaskStatus},
+    task::{
+        create_task, get_task, list_tasks, update_task_output_artifact, update_task_status,
+        TaskStatus,
+    },
 };
 
 #[derive(Debug, Deserialize)]
@@ -470,9 +473,9 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                         anyhow::anyhow!("related_to must be a JSON array of strings")
                     })?;
                     for (i, item) in arr.iter().enumerate() {
-                        let s = item.as_str().ok_or_else(|| {
-                            anyhow::anyhow!("related_to[{i}] must be a string")
-                        })?;
+                        let s = item
+                            .as_str()
+                            .ok_or_else(|| anyhow::anyhow!("related_to[{i}] must be a string"))?;
                         if !s.contains('/') {
                             anyhow::bail!(
                                 "related_to[{i}] must be in 'agent/key' format, got: {s}"
@@ -483,7 +486,17 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 })
                 .transpose()?;
 
-            memory_set(pool, agent, key, &value, spec, mem_type, ttl_seconds, related_to.as_deref()).await?;
+            memory_set(
+                pool,
+                agent,
+                key,
+                &value,
+                spec,
+                mem_type,
+                ttl_seconds,
+                related_to.as_deref(),
+            )
+            .await?;
             Ok(json!({"ok": true}))
         }
 
@@ -499,8 +512,8 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 let memory = memory_get_full(pool, agent, key, spec).await?;
                 if let Some(m) = memory {
                     let value = parse_memory_value(&m.value);
-                    let related_to: Value = serde_json::from_str(&m.related_to)
-                        .unwrap_or_else(|_| json!([]));
+                    let related_to: Value =
+                        serde_json::from_str(&m.related_to).unwrap_or_else(|_| json!([]));
                     Ok(json!({
                         "value": value,
                         "type": m.type_,
@@ -1013,9 +1026,18 @@ mod tests {
     #[tokio::test]
     async fn state_snapshot_includes_memory_stats_when_agent_given() {
         let pool = make_pool().await;
-        memory_set(&pool, "alice", "k1", "v1", None, Some("decision"), None, None)
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "k1",
+            "v1",
+            None,
+            Some("decision"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         let result = dispatch_tool(&pool, "state_snapshot", json!({"agent": "alice"}))
             .await
             .unwrap();
@@ -1249,7 +1271,10 @@ mod tests {
         .await
         .unwrap();
         let arr = events.as_array().unwrap();
-        assert!(arr.is_empty(), "until in the past should exclude all events");
+        assert!(
+            arr.is_empty(),
+            "until in the past should exclude all events"
+        );
     }
 
     #[tokio::test]

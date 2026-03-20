@@ -224,7 +224,10 @@ mod tests {
         assert_eq!(task.title, "Implement feature", "task title must match");
         assert_eq!(task.agent, "sdd-builder", "task agent must match");
         assert_eq!(task.status, "pending", "new task must have status pending");
-        assert!(task.output_artifact.is_none(), "output_artifact must be None on creation");
+        assert!(
+            task.output_artifact.is_none(),
+            "output_artifact must be None on creation"
+        );
     }
 
     // TC-02: get_task returns Some for existing task, None for non-existing.
@@ -234,10 +237,16 @@ mod tests {
         setup_task(&pool, "TASK-001").await;
 
         let found = get_task(&pool, "TASK-001").await.unwrap();
-        assert!(found.is_some(), "get_task must return Some for existing task");
+        assert!(
+            found.is_some(),
+            "get_task must return Some for existing task"
+        );
 
         let missing = get_task(&pool, "TASK-GHOST").await.unwrap();
-        assert!(missing.is_none(), "get_task must return None for non-existing task");
+        assert!(
+            missing.is_none(),
+            "get_task must return None for non-existing task"
+        );
     }
 
     // TC-03: list_tasks with no filter returns all tasks.
@@ -259,7 +268,11 @@ mod tests {
             .unwrap();
 
         let all = list_tasks(&pool, None, None, None).await.unwrap();
-        assert_eq!(all.len(), 2, "list_tasks with no filter must return all 2 tasks");
+        assert_eq!(
+            all.len(),
+            2,
+            "list_tasks with no filter must return all 2 tasks"
+        );
     }
 
     // TC-04: list_tasks with spec filter returns only matching tasks.
@@ -283,8 +296,14 @@ mod tests {
             .await
             .unwrap();
 
-        let filtered = list_tasks(&pool, Some("SPEC-001"), None, None).await.unwrap();
-        assert_eq!(filtered.len(), 2, "spec filter must return only 2 tasks for SPEC-001");
+        let filtered = list_tasks(&pool, Some("SPEC-001"), None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            filtered.len(),
+            2,
+            "spec filter must return only 2 tasks for SPEC-001"
+        );
         assert!(
             filtered.iter().all(|t| t.spec == "SPEC-001"),
             "all filtered tasks must belong to SPEC-001"
@@ -300,7 +319,10 @@ mod tests {
         let updated = update_task_status(&pool, "TASK-001", "in_progress")
             .await
             .unwrap();
-        assert_eq!(updated.status, "in_progress", "status must be in_progress after transition");
+        assert_eq!(
+            updated.status, "in_progress",
+            "status must be in_progress after transition"
+        );
     }
 
     // TC-06: valid transition in_progress → done succeeds.
@@ -312,10 +334,11 @@ mod tests {
             .await
             .unwrap();
 
-        let updated = update_task_status(&pool, "TASK-001", "done")
-            .await
-            .unwrap();
-        assert_eq!(updated.status, "done", "status must be done after in_progress→done transition");
+        let updated = update_task_status(&pool, "TASK-001", "done").await.unwrap();
+        assert_eq!(
+            updated.status, "done",
+            "status must be done after in_progress→done transition"
+        );
     }
 
     // TC-07: valid transition in_progress → failed succeeds.
@@ -330,7 +353,10 @@ mod tests {
         let updated = update_task_status(&pool, "TASK-001", "failed")
             .await
             .unwrap();
-        assert_eq!(updated.status, "failed", "status must be failed after in_progress→failed transition");
+        assert_eq!(
+            updated.status, "failed",
+            "status must be failed after in_progress→failed transition"
+        );
     }
 
     // TC-08: invalid transition pending → done is rejected.
@@ -340,7 +366,10 @@ mod tests {
         setup_task(&pool, "TASK-001").await;
 
         let result = update_task_status(&pool, "TASK-001", "done").await;
-        assert!(result.is_err(), "pending→done must be rejected as invalid transition");
+        assert!(
+            result.is_err(),
+            "pending→done must be rejected as invalid transition"
+        );
     }
 
     // TC-09: invalid transition pending → failed is rejected.
@@ -350,7 +379,10 @@ mod tests {
         setup_task(&pool, "TASK-001").await;
 
         let result = update_task_status(&pool, "TASK-001", "failed").await;
-        assert!(result.is_err(), "pending→failed must be rejected as invalid transition");
+        assert!(
+            result.is_err(),
+            "pending→failed must be rejected as invalid transition"
+        );
     }
 
     // TC-10: invalid transition done → pending is rejected.
@@ -361,12 +393,13 @@ mod tests {
         update_task_status(&pool, "TASK-001", "in_progress")
             .await
             .unwrap();
-        update_task_status(&pool, "TASK-001", "done")
-            .await
-            .unwrap();
+        update_task_status(&pool, "TASK-001", "done").await.unwrap();
 
         let result = update_task_status(&pool, "TASK-001", "pending").await;
-        assert!(result.is_err(), "done→pending must be rejected as invalid transition");
+        assert!(
+            result.is_err(),
+            "done→pending must be rejected as invalid transition"
+        );
     }
 
     // TC-11: invalid transition failed → in_progress is rejected.
@@ -382,7 +415,10 @@ mod tests {
             .unwrap();
 
         let result = update_task_status(&pool, "TASK-001", "in_progress").await;
-        assert!(result.is_err(), "failed→in_progress must be rejected as invalid transition");
+        assert!(
+            result.is_err(),
+            "failed→in_progress must be rejected as invalid transition"
+        );
     }
 
     // TC-12: invalid transition done → in_progress is rejected.
@@ -393,12 +429,13 @@ mod tests {
         update_task_status(&pool, "TASK-001", "in_progress")
             .await
             .unwrap();
-        update_task_status(&pool, "TASK-001", "done")
-            .await
-            .unwrap();
+        update_task_status(&pool, "TASK-001", "done").await.unwrap();
 
         let result = update_task_status(&pool, "TASK-001", "in_progress").await;
-        assert!(result.is_err(), "done→in_progress must be rejected as invalid transition");
+        assert!(
+            result.is_err(),
+            "done→in_progress must be rejected as invalid transition"
+        );
     }
 
     // TC-13: update_task_status on non-existent task returns error.
@@ -407,7 +444,10 @@ mod tests {
         let pool = make_pool().await;
 
         let result = update_task_status(&pool, "TASK-GHOST", "in_progress").await;
-        assert!(result.is_err(), "update_task_status on non-existent task must return error");
+        assert!(
+            result.is_err(),
+            "update_task_status on non-existent task must return error"
+        );
     }
 
     // TC-14: update_task_output_artifact sets the output_artifact field.
@@ -458,7 +498,10 @@ mod tests {
         .unwrap();
 
         let parsed: Vec<String> = serde_json::from_str(&task.inputs).unwrap();
-        assert_eq!(parsed, inputs, "inputs must be stored and retrieved as JSON array");
+        assert_eq!(
+            parsed, inputs,
+            "inputs must be stored and retrieved as JSON array"
+        );
     }
 
     // TC-17: failed → pending (replan) succeeds via update_task_status.
@@ -476,7 +519,10 @@ mod tests {
         let updated = update_task_status(&pool, "TASK-001", "pending")
             .await
             .unwrap();
-        assert_eq!(updated.status, "pending", "status must be pending after failed→pending replan");
+        assert_eq!(
+            updated.status, "pending",
+            "status must be pending after failed→pending replan"
+        );
     }
 
     // TC-18: full round-trip: pending → in_progress → failed → pending → in_progress → done.
@@ -485,12 +531,23 @@ mod tests {
         let pool = make_pool().await;
         setup_task(&pool, "TASK-001").await;
 
-        update_task_status(&pool, "TASK-001", "in_progress").await.unwrap();
-        update_task_status(&pool, "TASK-001", "failed").await.unwrap();
-        update_task_status(&pool, "TASK-001", "pending").await.unwrap();
-        update_task_status(&pool, "TASK-001", "in_progress").await.unwrap();
+        update_task_status(&pool, "TASK-001", "in_progress")
+            .await
+            .unwrap();
+        update_task_status(&pool, "TASK-001", "failed")
+            .await
+            .unwrap();
+        update_task_status(&pool, "TASK-001", "pending")
+            .await
+            .unwrap();
+        update_task_status(&pool, "TASK-001", "in_progress")
+            .await
+            .unwrap();
 
         let updated = update_task_status(&pool, "TASK-001", "done").await.unwrap();
-        assert_eq!(updated.status, "done", "task must reach done after replan round-trip");
+        assert_eq!(
+            updated.status, "done",
+            "task must reach done after replan round-trip"
+        );
     }
 }

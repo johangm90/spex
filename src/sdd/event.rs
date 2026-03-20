@@ -93,10 +93,18 @@ mod tests {
     #[tokio::test]
     async fn test_emit_and_query_event_happy_path() {
         let pool = make_pool().await;
-        emit_event(&pool, "task.created", Some("SPEC-001"), Some("agent-x"), r#"{"key":"val"}"#)
+        emit_event(
+            &pool,
+            "task.created",
+            Some("SPEC-001"),
+            Some("agent-x"),
+            r#"{"key":"val"}"#,
+        )
+        .await
+        .unwrap();
+        let events = query_events(&pool, None, None, None, None, None, None, None)
             .await
             .unwrap();
-        let events = query_events(&pool, None, None, None, None, None, None, None).await.unwrap();
         assert_eq!(events.len(), 1);
         let e = &events[0];
         assert_eq!(e.r#type, "task.created");
@@ -109,11 +117,24 @@ mod tests {
     #[tokio::test]
     async fn test_query_events_type_filter() {
         let pool = make_pool().await;
-        emit_event(&pool, "spec.created", None, None, "{}").await.unwrap();
-        emit_event(&pool, "task.done", None, None, "{}").await.unwrap();
-        let events = query_events(&pool, Some("spec.created"), None, None, None, None, None, None)
+        emit_event(&pool, "spec.created", None, None, "{}")
             .await
             .unwrap();
+        emit_event(&pool, "task.done", None, None, "{}")
+            .await
+            .unwrap();
+        let events = query_events(
+            &pool,
+            Some("spec.created"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].r#type, "spec.created");
     }
@@ -121,8 +142,12 @@ mod tests {
     #[tokio::test]
     async fn test_query_events_spec_filter() {
         let pool = make_pool().await;
-        emit_event(&pool, "ev", Some("SPEC-A"), None, "{}").await.unwrap();
-        emit_event(&pool, "ev", Some("SPEC-B"), None, "{}").await.unwrap();
+        emit_event(&pool, "ev", Some("SPEC-A"), None, "{}")
+            .await
+            .unwrap();
+        emit_event(&pool, "ev", Some("SPEC-B"), None, "{}")
+            .await
+            .unwrap();
         let events = query_events(&pool, None, Some("SPEC-A"), None, None, None, None, None)
             .await
             .unwrap();
@@ -138,14 +163,18 @@ mod tests {
                 .await
                 .unwrap();
         }
-        let events = query_events(&pool, None, None, None, Some(2), None, None, None).await.unwrap();
+        let events = query_events(&pool, None, None, None, Some(2), None, None, None)
+            .await
+            .unwrap();
         assert_eq!(events.len(), 2);
     }
 
     #[tokio::test]
     async fn test_query_events_empty_db() {
         let pool = make_pool().await;
-        let events = query_events(&pool, None, None, None, None, None, None, None).await.unwrap();
+        let events = query_events(&pool, None, None, None, None, None, None, None)
+            .await
+            .unwrap();
         assert!(events.is_empty());
     }
 }

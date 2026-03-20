@@ -1,6 +1,6 @@
 # Contributing to spex
 
-Thank you for your interest in contributing! This guide covers the development workflow, code conventions, and the agent skill development process.
+Thank you for your interest in contributing! This guide covers the development workflow, code conventions, and how bundled agents differ from custom generated skills.
 
 ## Table of Contents
 
@@ -95,23 +95,26 @@ Tests use an in-memory SQLite database (`sqlite::memory:`) — no setup required
 - `cargo fmt` is enforced in CI. Run it before committing.
 - `cargo clippy -- -D warnings` is enforced in CI. Fix all warnings.
 - Keep functions short; prefer named helper functions over long `match` chains.
-- In MCP server code (`src/mcp/server.rs`), only use `state_*` canonical tool names in new code. Legacy aliases (`spec_*`, `slice_*`) exist for backwards compatibility only.
+- In MCP server code (`src/mcp/server.rs`), follow the current canonical MCP tool surface: state operations use `state_*` names and memory operations use `memory_*` names.
 - All MCP state must be stored via the MCP tools — never write orchestration files to the repository.
 
 ---
 
 ## Agent Skill Development
 
-Bundled agent skills live in `skills/` (e.g. `skills/spex-orchestrate/SKILL.md`). They are embedded into the binary via `include_dir!` and installed to `~/.config/opencode/skills/` by `spex setup` / `spex skill install --all`.
+This repository currently uses both bundled agents and custom generated skills:
 
-**To add or update a skill:**
+- Bundled agent files live in `agents/*.md`, are embedded into the binary via `include_dir!`, and install to `~/.config/opencode/agents` when you run `spex setup` or `spex skill install --all`.
+- Custom project skills are separate `SKILL.md` files under `~/.config/opencode/skills/<slug>/`, typically scaffolded by `skill-builder` for a specific stack or codebase.
 
-1. Edit or create `skills/<skill-name>/SKILL.md`.
-2. If adding a new skill, add it to the `BUNDLED_SKILLS` list in `src/skills_mgr.rs`.
-3. Run `spex skill install --all` to push the updated skill to your local OpenCode config.
-4. Test by opening OpenCode and invoking the skill.
+**To add or update a bundled agent:**
 
-**Skill file format:** Plain Markdown. No special syntax required. The first `# Heading` is treated as the skill title. Skills are read-only from the agent's perspective — agents cannot modify their own skill files.
+1. Edit or create `agents/<agent-name>.md`.
+2. Run `spex skill install --all` to copy the updated bundled agents into your local OpenCode config.
+3. Run `spex skill list` to confirm the markdown files are installed.
+4. Test by opening OpenCode and invoking the agent.
+
+**Bundled agent file format:** Plain Markdown. Keep instructions explicit and implementation-backed; avoid documenting behavior the CLI or MCP server does not currently implement.
 
 ---
 
@@ -123,4 +126,4 @@ Please include:
 - `spex doctor` output
 - Steps to reproduce
 
-For MCP server issues, run with `RUST_LOG=debug` (once structured logging is implemented) or capture stderr from `spex mcp serve`.
+For MCP server issues, capture stderr from `spex mcp serve` and include the command or client flow that triggered the problem.

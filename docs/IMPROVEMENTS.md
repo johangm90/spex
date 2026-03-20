@@ -13,10 +13,10 @@ This document is the prioritised improvement backlog for the `spex` CLI tool. It
 | IMP-005 | Completed: `doctor --fix` now performs basic auto-fixes | P1 | M | `src/doctor/mod.rs` |
 | IMP-006 | Completed: CONTRIBUTING guide exists | P1 | S | `CONTRIBUTING.md` |
 | IMP-007 | Completed: `memory_get_all` respects `spec` scope | P1 | S | `src/sdd/memory.rs` |
-| IMP-008 | MCP tool proliferation (27 aliases) | P2 | M | `src/mcp/server.rs` |
-| IMP-009 | Pagination is still incomplete across CLI list views | P2 | M | `src/sdd/*.rs` |
+| IMP-008 | Historical: MCP tool alias proliferation claim is obsolete | P2 | S | `src/mcp/server.rs` |
+| IMP-009 | Historical: pagination gap claim is obsolete as written | P2 | S | `src/main.rs` |
 | IMP-011 | Completed: `spex pulse` supports time-range filters | P2 | S | `src/cli/pulse.rs` |
-| IMP-012 | Structured logging exists, but adoption is partial | P2 | M | project-wide |
+| IMP-012 | Historical: structured logging adoption claim is obsolete | P2 | S | project-wide |
 | IMP-013 | Completed: release profile is tuned for smaller binaries | P3 | S | `Cargo.toml` |
 | IMP-014 | `spex doctor` checks are still hard-coded in one module | P3 | S | `src/doctor/mod.rs` |
 | IMP-015 | No shell completion generation | P3 | S | `src/main.rs` |
@@ -49,11 +49,11 @@ This document is the prioritised improvement backlog for the `spex` CLI tool. It
 
 ## IMP-003 — Automated tests exist, but coverage is still thin (Priority: P1)
 
-**Problem:** The repository now has automated CLI tests in `tests/cli_tests.rs`, so the project no longer has zero tests. However, coverage is still light and remains concentrated in a few end-to-end paths.
+**Problem:** The repository no longer has zero tests, but coverage still relies mainly on inline `#[cfg(test)]` modules in `src/` rather than a broader mix of integration-style coverage. The current codebase contains many Rust unit and async tests, yet the remaining gap is still depth around cross-command and regression-prone paths.
 
 **Location:** `project-wide`
 
-**Proposed Solution:** Expand beyond the current CLI smoke tests with focused unit and integration coverage for the SDD and MCP layers, especially around state queries, filtering, and regression-prone command behavior.
+**Proposed Solution:** Keep the current inline test coverage and add targeted higher-level tests where regressions are most likely, especially around CLI behavior, MCP tool wiring, and state-query edge cases.
 
 **Effort:** L
 
@@ -107,27 +107,27 @@ This document is the prioritised improvement backlog for the `spex` CLI tool. It
 
 ---
 
-## IMP-008 — MCP tool proliferation (27 aliases) (Priority: P2)
+## IMP-008 — Historical: MCP tool alias proliferation claim is obsolete (Priority: P2)
 
-**Problem:** `tools/list` exposes 27 entries because the server registers three prefix aliases for each tool (`spec_*`, `slice_*`, `state_*`). This inflates the tool list shown to LLM agents, increases token usage, and causes confusion about canonical names.
+**Status:** Obsolete as written. The current `build_tools_list()` implementation exposes 20 canonical MCP tools split across `state_*` and `memory_*` names; the earlier "27 aliases" claim no longer matches the source.
 
 **Location:** `src/mcp/server.rs` — tool registration
 
-**Proposed Solution:** Keep only the `state_*` canonical names. Move `spec_*` and `slice_*` aliases behind a `--legacy-aliases` flag (default: off). Update the README and skill files to reference canonical names only. Emit a deprecation warning when a legacy alias is used.
+**Note:** If tool proliferation becomes a problem again, create a new backlog item based on the current MCP surface instead of preserving the retired alias description.
 
-**Effort:** M
+**Effort:** S
 
 ---
 
-## IMP-009 — Pagination is still incomplete across CLI list views (Priority: P2)
+## IMP-009 — Historical: pagination gap claim is obsolete as written (Priority: P2)
 
-**Problem:** This is no longer universally true: the SDD/event layers support `LIMIT/OFFSET`, `spex trace` already has a `--limit`, and `spex pulse` supports time filtering. The remaining gap is that `spex spec list` and `spex task list` still do not expose pagination controls in the CLI.
+**Status:** Obsolete as written. The current CLI already exposes `--limit` and `--offset` for `spex spec list`, `spex task list`, and `spex trace`, so the broad "pagination is still incomplete" claim is no longer accurate.
 
-**Location:** `src/sdd/spec.rs`, `src/sdd/task.rs`, `src/sdd/event.rs`
+**Location:** `src/main.rs`
 
-**Proposed Solution:** Add `--limit N` (default: 50) and `--offset N` (default: 0) flags to all list commands. Thread these through the SDD layer as SQL `LIMIT ? OFFSET ?` parameters. Add `--all` flag to bypass pagination.
+**Note:** If future pagination UX gaps remain, track them with a narrower item that names the exact command and missing behavior.
 
-**Effort:** M
+**Effort:** S
 
 ---
 
@@ -143,15 +143,15 @@ This document is the prioritised improvement backlog for the `spex` CLI tool. It
 
 ---
 
-## IMP-012 — Structured logging exists, but adoption is partial (Priority: P2)
+## IMP-012 — Historical: structured logging adoption claim is obsolete (Priority: P2)
 
-**Problem:** The project now initializes `tracing_subscriber` and uses `tracing` in the MCP server, so the repository no longer lacks structured logging entirely. The remaining gap is inconsistent adoption across the rest of the codebase.
+**Status:** Obsolete as written. No current `tracing_subscriber` or `tracing` usage was verified in `src/` or `Cargo.toml`, so this item describes a state the repository does not presently implement.
 
 **Location:** `project-wide`
 
-**Proposed Solution:** Continue migrating internal diagnostics to `tracing` where structured logs add value, while keeping normal user-facing CLI output on stdout/stderr as appropriate.
+**Note:** If structured logging is introduced later, open a fresh backlog item describing the actual implementation gap at that time.
 
-**Effort:** M
+**Effort:** S
 
 ---
 

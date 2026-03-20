@@ -110,16 +110,18 @@ pub async fn query_artifacts(
     Ok(rows
         .into_iter()
         .map(
-            |(id, spec, task, agent, r#type, path, description, created_at, content_hash)| Artifact {
-                id,
-                spec,
-                task,
-                agent,
-                r#type,
-                path,
-                description,
-                created_at,
-                content_hash,
+            |(id, spec, task, agent, r#type, path, description, created_at, content_hash)| {
+                Artifact {
+                    id,
+                    spec,
+                    task,
+                    agent,
+                    r#type,
+                    path,
+                    description,
+                    created_at,
+                    content_hash,
+                }
             },
         )
         .collect())
@@ -133,7 +135,17 @@ mod tests {
     #[tokio::test]
     async fn test_register_artifact_fields() {
         let pool = make_pool().await;
-        let artifact = register_artifact(&pool, "art-001", Some("SPEC-001"), Some("task-1"), "builder-agent", "code", Some("/src/lib.rs"), Some("main library"), None)
+        let artifact = register_artifact(
+            &pool,
+            "art-001",
+            Some("SPEC-001"),
+            Some("task-1"),
+            "builder-agent",
+            "code",
+            Some("/src/lib.rs"),
+            Some("main library"),
+            None,
+        )
         .await
         .unwrap();
         assert_eq!(artifact.id, "art-001");
@@ -149,12 +161,32 @@ mod tests {
     #[tokio::test]
     async fn test_query_artifacts_agent_filter() {
         let pool = make_pool().await;
-        register_artifact(&pool, "a1", None, None, "agent-alpha", "doc", None, None, None)
-            .await
-            .unwrap();
-        register_artifact(&pool, "a2", None, None, "agent-beta", "doc", None, None, None)
-            .await
-            .unwrap();
+        register_artifact(
+            &pool,
+            "a1",
+            None,
+            None,
+            "agent-alpha",
+            "doc",
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        register_artifact(
+            &pool,
+            "a2",
+            None,
+            None,
+            "agent-beta",
+            "doc",
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         let results = query_artifacts(&pool, None, None, Some("agent-alpha"), None)
             .await
             .unwrap();
@@ -171,14 +203,18 @@ mod tests {
         register_artifact(&pool, "b2", None, None, "agent-y", "doc", None, None, None)
             .await
             .unwrap();
-        let results = query_artifacts(&pool, None, None, None, None).await.unwrap();
+        let results = query_artifacts(&pool, None, None, None, None)
+            .await
+            .unwrap();
         assert_eq!(results.len(), 2);
     }
 
     #[tokio::test]
     async fn test_query_artifacts_empty_db() {
         let pool = make_pool().await;
-        let results = query_artifacts(&pool, None, None, None, None).await.unwrap();
+        let results = query_artifacts(&pool, None, None, None, None)
+            .await
+            .unwrap();
         assert!(results.is_empty());
     }
 
@@ -227,9 +263,19 @@ mod tests {
     async fn test_query_artifacts_returns_content_hash() {
         let pool = make_pool().await;
         let hash = "sha256:deadbeef";
-        register_artifact(&pool, "art-q", None, None, "builder", "code", None, None, Some(hash))
-            .await
-            .unwrap();
+        register_artifact(
+            &pool,
+            "art-q",
+            None,
+            None,
+            "builder",
+            "code",
+            None,
+            None,
+            Some(hash),
+        )
+        .await
+        .unwrap();
 
         let results = query_artifacts(&pool, None, None, Some("builder"), None)
             .await

@@ -251,7 +251,10 @@ mod tests {
         assert_eq!(spec.id, "SPEC-001", "id must match the given id");
         assert_eq!(spec.title, "My Feature", "title must match the given title");
         assert_eq!(spec.status, "draft", "new spec must have status 'draft'");
-        assert_eq!(spec.priority, "P0", "priority must match the given priority");
+        assert_eq!(
+            spec.priority, "P0",
+            "priority must match the given priority"
+        );
         assert_eq!(spec.ac_total, 0, "ac_total must start at 0");
         assert_eq!(spec.ac_passed, 0, "ac_passed must start at 0");
         assert_eq!(spec.agents, "[]", "agents must start as empty JSON array");
@@ -334,8 +337,7 @@ mod tests {
 
     #[tokio::test]
     async fn transition_approved_to_in_progress_is_valid() {
-        validate_transition("approved", "in_progress")
-            .expect("approved→in_progress must be valid");
+        validate_transition("approved", "in_progress").expect("approved→in_progress must be valid");
     }
 
     #[tokio::test]
@@ -480,39 +482,71 @@ mod tests {
     #[tokio::test]
     async fn quality_gate_blocks_done_with_zero_ac_total() {
         let pool = make_pool().await;
-        create_spec(&pool, "SPEC-QG1", "QG Test", "P0", &[]).await.unwrap();
-        update_spec_status(&pool, "SPEC-QG1", "approved", "human").await.unwrap();
-        update_spec_status(&pool, "SPEC-QG1", "in_progress", "agent").await.unwrap();
+        create_spec(&pool, "SPEC-QG1", "QG Test", "P0", &[])
+            .await
+            .unwrap();
+        update_spec_status(&pool, "SPEC-QG1", "approved", "human")
+            .await
+            .unwrap();
+        update_spec_status(&pool, "SPEC-QG1", "in_progress", "agent")
+            .await
+            .unwrap();
 
         let result = update_spec_status(&pool, "SPEC-QG1", "done", "agent").await;
         assert!(result.is_err(), "must reject done when ac_total is 0");
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("ac_total is 0"), "error must mention ac_total: {msg}");
+        assert!(
+            msg.contains("ac_total is 0"),
+            "error must mention ac_total: {msg}"
+        );
     }
 
     #[tokio::test]
     async fn quality_gate_blocks_done_with_incomplete_acs() {
         let pool = make_pool().await;
-        create_spec(&pool, "SPEC-QG2", "QG Test 2", "P0", &[]).await.unwrap();
-        update_spec_status(&pool, "SPEC-QG2", "approved", "human").await.unwrap();
-        update_spec_status(&pool, "SPEC-QG2", "in_progress", "agent").await.unwrap();
+        create_spec(&pool, "SPEC-QG2", "QG Test 2", "P0", &[])
+            .await
+            .unwrap();
+        update_spec_status(&pool, "SPEC-QG2", "approved", "human")
+            .await
+            .unwrap();
+        update_spec_status(&pool, "SPEC-QG2", "in_progress", "agent")
+            .await
+            .unwrap();
         update_spec_ac(&pool, "SPEC-QG2", 5, 3).await.unwrap();
 
         let result = update_spec_status(&pool, "SPEC-QG2", "done", "agent").await;
-        assert!(result.is_err(), "must reject done when ac_passed < ac_total");
+        assert!(
+            result.is_err(),
+            "must reject done when ac_passed < ac_total"
+        );
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("ac_passed (3) != ac_total (5)"), "error must mention counts: {msg}");
+        assert!(
+            msg.contains("ac_passed (3) != ac_total (5)"),
+            "error must mention counts: {msg}"
+        );
     }
 
     #[tokio::test]
     async fn quality_gate_allows_done_with_all_acs_passed() {
         let pool = make_pool().await;
-        create_spec(&pool, "SPEC-QG3", "QG Test 3", "P0", &[]).await.unwrap();
-        update_spec_status(&pool, "SPEC-QG3", "approved", "human").await.unwrap();
-        update_spec_status(&pool, "SPEC-QG3", "in_progress", "agent").await.unwrap();
+        create_spec(&pool, "SPEC-QG3", "QG Test 3", "P0", &[])
+            .await
+            .unwrap();
+        update_spec_status(&pool, "SPEC-QG3", "approved", "human")
+            .await
+            .unwrap();
+        update_spec_status(&pool, "SPEC-QG3", "in_progress", "agent")
+            .await
+            .unwrap();
         update_spec_ac(&pool, "SPEC-QG3", 3, 3).await.unwrap();
 
-        let updated = update_spec_status(&pool, "SPEC-QG3", "done", "agent").await.unwrap();
-        assert_eq!(updated.status, "done", "must allow done when ac_passed == ac_total");
+        let updated = update_spec_status(&pool, "SPEC-QG3", "done", "agent")
+            .await
+            .unwrap();
+        assert_eq!(
+            updated.status, "done",
+            "must allow done when ac_passed == ac_total"
+        );
     }
 }

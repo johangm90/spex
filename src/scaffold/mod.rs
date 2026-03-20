@@ -103,7 +103,7 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
     );
     println!(
         "  {}",
-        "Tip: run `spex setup` once to install agent skills globally.".dimmed()
+        "Tip: run `spex setup` once to install bundled agents globally.".dimmed()
     );
 
     Ok(())
@@ -223,7 +223,7 @@ pub async fn init_project(dir: &Path) -> Result<()> {
     );
     println!(
         "  {}",
-        "Tip: run `spex setup` once to install agent skills globally.".dimmed()
+        "Tip: run `spex setup` once to install bundled agents globally.".dimmed()
     );
 
     Ok(())

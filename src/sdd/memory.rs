@@ -261,7 +261,8 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
     macro_rules! stats_query {
         ($qb:ident, $select:expr, $suffix:expr) => {{
             let mut $qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(format!(
-                "{} FROM memory WHERE agent = ", $select
+                "{} FROM memory WHERE agent = ",
+                $select
             ));
             $qb.push_bind(agent);
             if let Some(s) = spec {
@@ -345,11 +346,10 @@ pub struct GcResult {
 }
 
 pub async fn memory_gc(pool: &SqlitePool, dry_run: bool) -> Result<GcResult> {
-    let soft_deleted: Vec<(String, String, String)> = sqlx::query_as(
-        "SELECT agent, key, spec FROM memory WHERE deleted_at IS NOT NULL",
-    )
-    .fetch_all(pool)
-    .await?;
+    let soft_deleted: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT agent, key, spec FROM memory WHERE deleted_at IS NOT NULL")
+            .fetch_all(pool)
+            .await?;
 
     let expired: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT agent, key, spec FROM memory \
@@ -443,13 +443,31 @@ mod tests {
     async fn ac1_search_returns_fts5_results() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "arch_decision", "we use sqlite for persistence", None, None, None, None)
+        memory_set(
+            &pool,
+            "alice",
+            "arch_decision",
+            "we use sqlite for persistence",
+            None,
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
 
-        memory_set(&pool, "alice", "unrelated", "hello world", None, None, None, None)
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "unrelated",
+            "hello world",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         let results = memory_search(&pool, "alice", "sqlite", None, None, None)
             .await
@@ -488,7 +506,9 @@ mod tests {
             "deleted entry must not appear in search results"
         );
 
-        let all = memory_list(&pool, "alice", None, None, None, None).await.unwrap();
+        let all = memory_list(&pool, "alice", None, None, None, None)
+            .await
+            .unwrap();
         assert!(
             !all.iter().any(|m| m.key == "foo"),
             "deleted entry must not appear in memory_list"
@@ -500,7 +520,16 @@ mod tests {
     async fn ac3_memory_set_accepts_type_field() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "my_key", "my_value", Some("spec"), Some("decision"), None, None)
+        memory_set(
+            &pool,
+            "alice",
+            "my_key",
+            "my_value",
+            Some("spec"),
+            Some("decision"),
+            None,
+            None,
+        )
         .await
         .unwrap();
 
@@ -578,12 +607,30 @@ mod tests {
     async fn ac6_stats_returns_correct_counts() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "k1", "v1", None, Some("decision"), None, None)
-            .await
-            .unwrap();
-        memory_set(&pool, "alice", "k2", "v2", None, Some("pattern"), None, None)
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "k1",
+            "v1",
+            None,
+            Some("decision"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "k2",
+            "v2",
+            None,
+            Some("pattern"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         memory_set(&pool, "alice", "k3", "v3", None, None, None, None)
             .await
             .unwrap();
@@ -669,19 +716,41 @@ mod tests {
     async fn ac8_set_after_delete_resurrects_entry() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "ephemeral", "v1", None, Some("decision"), None, None)
+        memory_set(
+            &pool,
+            "alice",
+            "ephemeral",
+            "v1",
+            None,
+            Some("decision"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let deleted = memory_delete(&pool, "alice", "ephemeral", None)
             .await
             .unwrap();
-
-        let deleted = memory_delete(&pool, "alice", "ephemeral", None).await.unwrap();
         assert!(deleted);
 
-        let gone = memory_get_full(&pool, "alice", "ephemeral", None).await.unwrap();
-        assert!(gone.is_none(), "soft-deleted entry must be invisible");
-
-        memory_set(&pool, "alice", "ephemeral", "v2", None, Some("pattern"), None, None)
+        let gone = memory_get_full(&pool, "alice", "ephemeral", None)
             .await
             .unwrap();
+        assert!(gone.is_none(), "soft-deleted entry must be invisible");
+
+        memory_set(
+            &pool,
+            "alice",
+            "ephemeral",
+            "v2",
+            None,
+            Some("pattern"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         let resurrected = memory_get_full(&pool, "alice", "ephemeral", None)
             .await
@@ -690,8 +759,14 @@ mod tests {
 
         assert_eq!(resurrected.value, "v2");
         assert_eq!(resurrected.type_.as_deref(), Some("pattern"));
-        assert_eq!(resurrected.access_count, 0, "access_count must reset on resurrect");
-        assert!(resurrected.deleted_at.is_none(), "deleted_at must be cleared");
+        assert_eq!(
+            resurrected.access_count, 0,
+            "access_count must reset on resurrect"
+        );
+        assert!(
+            resurrected.deleted_at.is_none(),
+            "deleted_at must be cleared"
+        );
     }
 
     #[tokio::test]
@@ -718,9 +793,7 @@ mod tests {
                 .unwrap();
         assert_eq!(row.0, 0, "hard-deleted row must be gone");
 
-        let kept = memory_get_full(&pool, "alice", "keep", None)
-            .await
-            .unwrap();
+        let kept = memory_get_full(&pool, "alice", "keep", None).await.unwrap();
         assert!(kept.is_some(), "non-deleted entry must survive GC");
     }
 
@@ -767,12 +840,11 @@ mod tests {
         let result = memory_gc(&pool, true).await.unwrap();
         assert_eq!(result.deleted_count, 1);
 
-        let row: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM memory WHERE agent = 'alice' AND key = 'trash'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let row: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM memory WHERE agent = 'alice' AND key = 'trash'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(row.0, 1, "dry-run must not remove rows");
     }
 
@@ -780,12 +852,30 @@ mod tests {
     async fn gc_preserves_fts_consistency() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "survives", "important data", None, None, None, None)
-            .await
-            .unwrap();
-        memory_set(&pool, "alice", "dies", "doomed data", None, None, None, None)
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "survives",
+            "important data",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "dies",
+            "doomed data",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         memory_delete(&pool, "alice", "dies", None).await.unwrap();
 
         memory_gc(&pool, false).await.unwrap();
@@ -799,7 +889,10 @@ mod tests {
         let ghost = memory_search(&pool, "alice", "doomed", None, None, None)
             .await
             .unwrap();
-        assert!(ghost.is_empty(), "GC'd entry must not appear in FTS results");
+        assert!(
+            ghost.is_empty(),
+            "GC'd entry must not appear in FTS results"
+        );
     }
 
     #[tokio::test]
@@ -840,9 +933,18 @@ mod tests {
         let pool = make_pool().await;
 
         let links = r#"["alice/other"]"#;
-        memory_set(&pool, "alice", "searchable", "findme data", None, None, None, Some(links))
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "searchable",
+            "findme data",
+            None,
+            None,
+            None,
+            Some(links),
+        )
+        .await
+        .unwrap();
 
         let results = memory_search(&pool, "alice", "findme", None, None, None)
             .await
@@ -856,15 +958,42 @@ mod tests {
     async fn cross_spec_global_entry_visible_when_querying_specific_spec() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "local", "local-val", Some("SPEC-001"), None, None, None)
-            .await
-            .unwrap();
-        memory_set(&pool, "alice", "global", "global-val", Some("*"), None, None, None)
-            .await
-            .unwrap();
-        memory_set(&pool, "alice", "other", "other-val", Some("SPEC-002"), None, None, None)
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "local",
+            "local-val",
+            Some("SPEC-001"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "global",
+            "global-val",
+            Some("*"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "other",
+            "other-val",
+            Some("SPEC-002"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         let results = memory_list(&pool, "alice", Some("SPEC-001"), None, None, None)
             .await
@@ -880,12 +1009,30 @@ mod tests {
     async fn cross_spec_global_entry_visible_in_search() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "spec-data", "shared pattern", Some("SPEC-001"), None, None, None)
-            .await
-            .unwrap();
-        memory_set(&pool, "alice", "global-data", "shared pattern", Some("*"), None, None, None)
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "spec-data",
+            "shared pattern",
+            Some("SPEC-001"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "global-data",
+            "shared pattern",
+            Some("*"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         let results = memory_search(&pool, "alice", "shared", Some("SPEC-001"), None, None)
             .await
@@ -900,15 +1047,37 @@ mod tests {
     async fn cross_spec_global_entry_visible_in_context() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "ctx-local", "v", Some("SPEC-001"), None, None, None)
-            .await
-            .unwrap();
-        memory_set(&pool, "alice", "ctx-global", "v", Some("*"), None, None, None)
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "ctx-local",
+            "v",
+            Some("SPEC-001"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "ctx-global",
+            "v",
+            Some("*"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
-        memory_get_full(&pool, "alice", "ctx-local", Some("SPEC-001")).await.unwrap();
-        memory_get_full(&pool, "alice", "ctx-global", Some("*")).await.unwrap();
+        memory_get_full(&pool, "alice", "ctx-local", Some("SPEC-001"))
+            .await
+            .unwrap();
+        memory_get_full(&pool, "alice", "ctx-global", Some("*"))
+            .await
+            .unwrap();
 
         let results = memory_context(&pool, "alice", Some("SPEC-001"), None)
             .await
@@ -923,15 +1092,29 @@ mod tests {
     async fn cross_spec_stats_includes_global_entries() {
         let pool = make_pool().await;
 
-        memory_set(&pool, "alice", "s1", "v", Some("SPEC-001"), None, None, None)
-            .await
-            .unwrap();
+        memory_set(
+            &pool,
+            "alice",
+            "s1",
+            "v",
+            Some("SPEC-001"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         memory_set(&pool, "alice", "g1", "v", Some("*"), None, None, None)
             .await
             .unwrap();
 
-        let stats = memory_stats(&pool, "alice", Some("SPEC-001")).await.unwrap();
-        assert_eq!(stats["total"], 2, "stats must count both spec-local and global entries");
+        let stats = memory_stats(&pool, "alice", Some("SPEC-001"))
+            .await
+            .unwrap();
+        assert_eq!(
+            stats["total"], 2,
+            "stats must count both spec-local and global entries"
+        );
     }
 
     #[tokio::test]
@@ -974,7 +1157,9 @@ mod tests {
             .unwrap();
         // Give "stale" a high access_count but old timestamps.
         for _ in 0..10 {
-            memory_get_full(&pool, "alice", "stale", None).await.unwrap();
+            memory_get_full(&pool, "alice", "stale", None)
+                .await
+                .unwrap();
         }
         // Backdate stale's last_accessed_at to make it old.
         sqlx::query(
@@ -989,7 +1174,9 @@ mod tests {
         memory_set(&pool, "alice", "recent", "v", None, None, None, None)
             .await
             .unwrap();
-        memory_get_full(&pool, "alice", "recent", None).await.unwrap();
+        memory_get_full(&pool, "alice", "recent", None)
+            .await
+            .unwrap();
 
         let ctx = memory_context(&pool, "alice", None, Some(1)).await.unwrap();
         assert_eq!(ctx.len(), 1);
@@ -1004,20 +1191,41 @@ mod tests {
         let pool = make_pool().await;
 
         memory_set(
-            &pool, "alice", "parent", "v", None, None, None,
+            &pool,
+            "alice",
+            "parent",
+            "v",
+            None,
+            None,
+            None,
             Some(r#"["bob/child"]"#),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
+        memory_set(&pool, "bob", "child", "v", None, None, None, None)
+            .await
+            .unwrap();
         memory_set(
-            &pool, "bob", "child", "v", None, None, None, None,
-        ).await.unwrap();
-        memory_set(
-            &pool, "carol", "other", "v", None, None, None,
+            &pool,
+            "carol",
+            "other",
+            "v",
+            None,
+            None,
+            None,
             Some(r#"["bob/child","alice/parent"]"#),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
-        let refs = memory_find_referencing(&pool, "bob/child", None).await.unwrap();
+        let refs = memory_find_referencing(&pool, "bob/child", None)
+            .await
+            .unwrap();
         let keys: Vec<&str> = refs.iter().map(|m| m.key.as_str()).collect();
-        assert!(keys.contains(&"parent"), "alice/parent references bob/child");
+        assert!(
+            keys.contains(&"parent"),
+            "alice/parent references bob/child"
+        );
         assert!(keys.contains(&"other"), "carol/other references bob/child");
         assert_eq!(refs.len(), 2);
     }
@@ -1027,12 +1235,22 @@ mod tests {
         let pool = make_pool().await;
 
         memory_set(
-            &pool, "alice", "linker", "v", None, None, None,
+            &pool,
+            "alice",
+            "linker",
+            "v",
+            None,
+            None,
+            None,
             Some(r#"["bob/target"]"#),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         memory_delete(&pool, "alice", "linker", None).await.unwrap();
 
-        let refs = memory_find_referencing(&pool, "bob/target", None).await.unwrap();
+        let refs = memory_find_referencing(&pool, "bob/target", None)
+            .await
+            .unwrap();
         assert!(refs.is_empty(), "deleted entries must be excluded");
     }
 
@@ -1041,15 +1259,33 @@ mod tests {
         let pool = make_pool().await;
 
         memory_set(
-            &pool, "alice", "s1-link", "v", Some("SPEC-001"), None, None,
+            &pool,
+            "alice",
+            "s1-link",
+            "v",
+            Some("SPEC-001"),
+            None,
+            None,
             Some(r#"["bob/target"]"#),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         memory_set(
-            &pool, "alice", "s2-link", "v", Some("SPEC-002"), None, None,
+            &pool,
+            "alice",
+            "s2-link",
+            "v",
+            Some("SPEC-002"),
+            None,
+            None,
             Some(r#"["bob/target"]"#),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
-        let refs = memory_find_referencing(&pool, "bob/target", Some("SPEC-001")).await.unwrap();
+        let refs = memory_find_referencing(&pool, "bob/target", Some("SPEC-001"))
+            .await
+            .unwrap();
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].key, "s1-link");
     }
@@ -1059,13 +1295,23 @@ mod tests {
         let pool = make_pool().await;
 
         memory_set(
-            &pool, "alice", "parent", "v", None, None, None,
+            &pool,
+            "alice",
+            "parent",
+            "v",
+            None,
+            None,
+            None,
             Some(r#"["bob/child","carol/keeper"]"#),
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         memory_set(&pool, "bob", "child", "v", None, None, None, None)
-            .await.unwrap();
+            .await
+            .unwrap();
         memory_set(&pool, "carol", "keeper", "v", None, None, None, None)
-            .await.unwrap();
+            .await
+            .unwrap();
 
         memory_delete(&pool, "bob", "child", None).await.unwrap();
 
@@ -1073,8 +1319,14 @@ mod tests {
         assert_eq!(result.deleted_count, 1);
 
         let parent = memory_get_full(&pool, "alice", "parent", None)
-            .await.unwrap().expect("parent must survive");
+            .await
+            .unwrap()
+            .expect("parent must survive");
         let refs: Vec<String> = serde_json::from_str(&parent.related_to).unwrap();
-        assert_eq!(refs, vec!["carol/keeper"], "orphan ref bob/child must be removed");
+        assert_eq!(
+            refs,
+            vec!["carol/keeper"],
+            "orphan ref bob/child must be removed"
+        );
     }
 }

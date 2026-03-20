@@ -46,7 +46,7 @@ The tool must work completely offline, install as a single binary with no extern
 
 The `.spex/state.db` file lives inside the project directory alongside source code. This means state is local-first and can optionally be committed to version control. There is no network dependency and no server to provision.
 
-The schema currently comprises seven tables: `constitution`, `specs`, `tasks`, `events`, `memory`, `artifacts`, and `meta`. Migrations are applied automatically at startup via `sqlx::migrate!`.
+The current schema comprises five working tables: `specs`, `tasks`, `events`, `memory`, and `artifacts`. Earlier `constitution` and `meta` tables were removed by migration `20260319100000_drop_vestigial_tables.sql`. Migrations are applied automatically at startup via `sqlx::migrate!`.
 
 #### Consequences
 
@@ -74,7 +74,7 @@ The schema currently comprises seven tables: `constitution`, `specs`, `tasks`, `
 
 OpenCode's MCP client natively supports the stdio transport. Launching `spex mcp serve` as a child process avoids port-allocation conflicts, removes the need for TLS or authentication, and keeps the tool stateless between MCP sessions (state lives in SQLite, not in process memory).
 
-The MCP server dispatches a canonical state-oriented tool set for snapshot, spec, task, event, memory, artifact, and PRD access, plus legacy alias entries for older naming schemes. Aliases allow agents that were trained on earlier `slice_*`, `spec_*`, or `constitution_*` names to continue working without changes. See **IMP-008** in `docs/IMPROVEMENTS.md` for the technical debt note on eventual alias retirement.
+The MCP server dispatches a canonical tool set for snapshot, spec, task, event, memory, artifact, and PRD access. The current source exposes 20 canonical tools split across `state_*` and `memory_*` names in `build_tools_list()`, and this document should treat that source as authoritative for tool counts and names.
 
 #### Consequences
 
@@ -82,7 +82,7 @@ The MCP server dispatches a canonical state-oriented tool set for snapshot, spec
 - ✅ No authentication surface — the process is owned by the same user.
 - ✅ Works out of the box with OpenCode's default MCP configuration.
 - ⚠️ A single MCP session is single-threaded by the stdio pipe; parallel agent calls are serialised.
-- ⚠️ Legacy aliases (IMP-008) represent technical debt: 13 duplicate registrations that must be maintained until all agents are retrained.
+- ⚠️ Tool counts are implementation-derived facts and should be re-verified against `src/mcp/server.rs` when the MCP surface changes.
 
 ---
 
@@ -101,15 +101,15 @@ The MCP server dispatches a canonical state-oriented tool set for snapshot, spec
 
 **`include_dir!` macro** (from the `include_dir` crate), evaluated at compile time.
 
-Eleven bundled agent skill directories plus shared resources are embedded directly into the `spex` binary. The `build.rs` build script verifies the assets directory exists at compile time so a broken asset path fails the build rather than producing a silent runtime error. When the user runs `spex setup`, the embedded tree is extracted to `~/.config/opencode/skills/`.
+Six bundled agent markdown files from `agents/` are embedded directly into the `spex` binary. `build.rs` watches `agents/` for rebuilds, and the current installer writes bundled files to `~/.config/opencode/agents/` when the user runs `spex setup` or `spex skill install --all`.
 
 #### Consequences
 
 - ✅ Offline installation — no internet access required after `cargo install spex`.
-- ✅ Skills are always version-locked to the binary; no drift between tool behaviour and agent prompts.
+- ✅ Bundled agents are version-locked to the binary; no drift between tool behaviour and shipped prompts.
 - ✅ Single binary distribution; no sidecar files.
-- ⚠️ Binary size increases with every new skill (currently 11 bundled skill directories).
-- ⚠️ Updating a skill requires a new binary release; there is no hot-reload path.
+- ⚠️ Binary size increases with every new bundled agent file.
+- ⚠️ Updating a bundled agent requires a new binary release; there is no hot-reload path.
 
 ---
 
@@ -196,36 +196,32 @@ Status values are stored in the `specs.status` column, and transitions are valid
 
 ---
 
-### 7. MCP Tool Naming — Multi-Prefix Alias Strategy
+### 7. MCP Tool Naming — Canonical State and Memory Names
 
 #### Options Considered
 
 | Option | Description |
 |--------|-------------|
-| **Multi-prefix aliases (chosen, flagged as debt)** | `state_*`, `spec_*`, `slice_*` all map to the same handlers |
-| Single canonical prefix only | One prefix (`state_*`); agents must be retrained |
+| **Canonical state + memory names (current)** | `state_*` and `memory_*` names map directly to the supported MCP operations |
+| Single `state_*` prefix only | One prefix for all tools, including memory operations |
 | Versioned tool names | `state_spec_get_v2`; explicit version in name |
 
 #### Decision Outcome
 
-**Three prefix families** are registered for backward compatibility during early adoption:
+The current implementation exposes 20 canonical MCP tools:
 
-- `state_*` — canonical (14 tools)
-- `spec_*` / `task_*` / `event_*` / `memory_*` / `artifact_*` / `constitution_*` — direct-domain aliases
-- `slice_*` — legacy aliases matching an earlier naming scheme
+- 12 `state_*` tools for snapshot, spec, task, event, artifact, and PRD operations
+- 8 `memory_*` tools for memory storage, search, deletion, statistics, and relationship lookup
 
-All 27 registrations dispatch to the same 14 handler functions. This allows agents trained on any prefix to interoperate without prompt changes.
-
-This is explicitly flagged as technical debt in **IMP-008** (`docs/IMPROVEMENTS.md`). Once all agent skills have been updated to use `state_*` exclusively, the alias registrations will be removed.
+This tool surface is what `build_tools_list()` returns today, so it is the authoritative source for names and counts used by bundled agents and docs.
 
 Additionally, MCP `memory` entries include an optional `spec` scope field. Scoping is stored but not yet enforced as a read isolation boundary. See **IMP-007** in `docs/IMPROVEMENTS.md`.
 
 #### Consequences
 
-- ✅ Zero-friction adoption: agents trained on any prefix work without modification.
-- ✅ Smooth migration path: canonical prefix can be enforced at a later date.
-- ⚠️ 27-tool registration makes MCP tool listings verbose; LLM context windows include redundant entries.
-- ⚠️ Any breaking change to a handler signature must be reflected across all alias registrations.
+- ✅ Tool listings match the current MCP surface directly; docs can refer to canonical names without alias indirection.
+- ✅ Memory capabilities are discoverable as first-class tools rather than implicit state sub-operations.
+- ⚠️ Published tool counts still require periodic verification because they can drift when new tools are added.
 - ⚠️ Memory entries are not yet scope-isolated by spec (IMP-007); agents reading memory may see entries from unrelated specs.
 
 ---
@@ -241,9 +237,9 @@ Additionally, MCP `memory` entries include an optional `spec` scope field. Scopi
 | CLI framework | Clap v4 derive | `clap` |
 | Database | SQLite | `sqlx` |
 | Serialization | JSON | `serde`, `serde_json` |
-| Terminal tables | comfy-table | `comfy-table` |
+| Terminal tables | Plain CLI formatting | — |
 | Terminal colour | ANSI | `colored` |
-| Interactive prompts | dialoguer | `dialoguer` |
+| Interactive prompts | inquire | `inquire` |
 | Asset embedding | compile-time | `include_dir` |
 
 ### Directory Conventions
@@ -252,19 +248,19 @@ Additionally, MCP `memory` entries include an optional `spec` scope field. Scopi
 .spex/
   state.db          # SQLite database (project-local)
 ~/.config/opencode/
-  skills/           # Extracted agent skill files
+  agents/           # Installed bundled agent markdown files
+  skills/<slug>/    # Generated custom project skills (`SKILL.md`)
 ```
 
 ### Build-Time Requirements
 
 - `DATABASE_URL=sqlite:.spex/state.db` must be set (or use `cargo sqlx prepare` offline cache).
-- The embedded skills assets directory must exist at the path referenced in `build.rs`.
+- The embedded bundled-agent directory must exist at the path referenced in `build.rs`.
 
 ### Cross-References to Improvement Backlog
 
 | ID | Summary |
 |----|---------|
 | IMP-007 | Memory scope isolation — enforce `spec` field as a read boundary |
-| IMP-008 | Retire legacy MCP tool alias prefixes after agent retraining |
 
-All items are tracked in `docs/IMPROVEMENTS.md`.
+Open improvement items are tracked in `docs/IMPROVEMENTS.md`.

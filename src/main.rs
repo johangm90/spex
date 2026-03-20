@@ -42,7 +42,7 @@ pub enum Commands {
     /// Initialise spex in the current directory (existing project)
     Init,
 
-    /// One-time global setup: install agent skills and write MCP config
+    /// One-time global setup: install bundled agents and write MCP config
     Setup {
         /// Write MCP config to global ~/.config/opencode/config.json instead of ./opencode.json
         #[arg(long)]
@@ -104,7 +104,10 @@ pub enum Commands {
         cmd: McpCmd,
     },
 
-    /// Skill management
+    #[command(
+        about = "Bundled agent management",
+        long_about = "Manage bundled agents installed under ~/.config/opencode/agents/.\n\nThis command group does not manage generated custom skills. Custom skills remain separate `SKILL.md` files under ~/.config/opencode/skills/<slug>/SKILL.md."
+    )]
     Skill {
         #[command(subcommand)]
         cmd: SkillCmd,
@@ -215,12 +218,15 @@ pub enum McpCmd {
 
 #[derive(Subcommand)]
 pub enum SkillCmd {
-    /// Install bundled skills to ~/.config/opencode/skills/
+    #[command(
+        about = "Install bundled agents to ~/.config/opencode/agents/",
+        long_about = "Install bundled agents to ~/.config/opencode/agents/.\n\nGenerated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.config/opencode/skills/<slug>/SKILL.md."
+    )]
     Install {
         #[arg(long)]
         all: bool,
     },
-    /// List installed skills
+    /// List installed bundled agents
     List,
 }
 
@@ -296,7 +302,11 @@ async fn main() -> Result<()> {
                 SpecCmd::Approve { id } => cmd_spec_approve(&pool, &id).await?,
                 SpecCmd::Start { id } => cmd_spec_start(&pool, &id).await?,
                 SpecCmd::Done { id } => cmd_spec_done(&pool, &id).await?,
-                SpecCmd::List { json, limit, offset } => cmd_spec_list(&pool, json, limit, offset).await?,
+                SpecCmd::List {
+                    json,
+                    limit,
+                    offset,
+                } => cmd_spec_list(&pool, json, limit, offset).await?,
                 SpecCmd::Show { id } => cmd_spec_show(&pool, &id).await?,
             }
         }
@@ -334,9 +344,12 @@ async fn main() -> Result<()> {
                 TaskCmd::Start { id } => cmd_task_start(&pool, &id).await?,
                 TaskCmd::Done { id } => cmd_task_done(&pool, &id).await?,
                 TaskCmd::Fail { id } => cmd_task_fail(&pool, &id).await?,
-                TaskCmd::List { spec_id, json, limit, offset } => {
-                    cmd_task_list(&pool, spec_id.as_deref(), json, limit, offset).await?
-                }
+                TaskCmd::List {
+                    spec_id,
+                    json,
+                    limit,
+                    offset,
+                } => cmd_task_list(&pool, spec_id.as_deref(), json, limit, offset).await?,
             }
         }
 
@@ -345,7 +358,12 @@ async fn main() -> Result<()> {
             cmd_pulse(&pool, since.as_deref(), until.as_deref()).await?;
         }
 
-        Commands::Trace { spec, agent, limit, offset } => {
+        Commands::Trace {
+            spec,
+            agent,
+            limit,
+            offset,
+        } => {
             let pool = open_project_db().await?;
             cmd_trace(&pool, spec.as_deref(), agent.as_deref(), limit, offset).await?;
         }
@@ -399,4 +417,81 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    fn render_help(mut command: clap::Command) -> String {
+        let mut output = Vec::new();
+        command
+            .write_long_help(&mut output)
+            .expect("help output must render");
+        String::from_utf8(output).expect("help output must be valid UTF-8")
+    }
+
+    fn render_subcommand_help(path: &[&str]) -> String {
+        let mut command = Cli::command();
+
+        for name in path {
+            command = command
+                .find_subcommand_mut(name)
+                .unwrap_or_else(|| panic!("missing subcommand: {name}"))
+                .clone();
+        }
+
+        render_help(command)
+    }
+
+    #[test]
+    fn root_help_lists_skill_as_bundled_agent_management() {
+        let help = render_help(Cli::command());
+
+        assert!(
+            help.contains("skill   Bundled agent management"),
+            "root help must describe the skill command as bundled agent management"
+        );
+    }
+
+    #[test]
+    fn skill_help_distinguishes_bundled_agents_from_custom_skills() {
+        let help = render_subcommand_help(&["skill"]);
+
+        assert!(
+            help.contains("Manage bundled agents installed under ~/.config/opencode/agents/."),
+            "skill help must point bundled agents to the agents directory"
+        );
+        assert!(
+            help.contains(
+                "Custom skills remain separate `SKILL.md` files under ~/.config/opencode/skills/<slug>/SKILL.md."
+            ),
+            "skill help must keep custom skills on the custom-skill path"
+        );
+        assert!(
+            !help.contains("bundled agents installed under ~/.config/opencode/skills/"),
+            "skill help must not point bundled agents to the skills directory"
+        );
+    }
+
+    #[test]
+    fn skill_install_help_uses_same_distinct_paths() {
+        let help = render_subcommand_help(&["skill", "install"]);
+
+        assert!(
+            help.contains("Install bundled agents to ~/.config/opencode/agents/."),
+            "skill install help must point bundled agents to the agents directory"
+        );
+        assert!(
+            help.contains(
+                "Generated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.config/opencode/skills/<slug>/SKILL.md."
+            ),
+            "skill install help must keep generated custom skills on the custom-skill path"
+        );
+        assert!(
+            !help.contains("Install bundled agents to ~/.config/opencode/skills/"),
+            "skill install help must not point bundled agents to the skills directory"
+        );
+    }
 }

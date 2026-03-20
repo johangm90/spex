@@ -47,7 +47,11 @@ pub async fn cmd_memory_show(
         Some(m) => {
             println!("{}: {}", "agent".dimmed(), m.agent);
             println!("{}: {}", "key".dimmed(), m.key.cyan());
-            println!("{}: {}", "spec".dimmed(), if m.spec.is_empty() { "-" } else { &m.spec });
+            println!(
+                "{}: {}",
+                "spec".dimmed(),
+                if m.spec.is_empty() { "-" } else { &m.spec }
+            );
             println!("{}: {}", "type".dimmed(), m.type_.as_deref().unwrap_or("-"));
             println!("{}: {}", "updated_at".dimmed(), m.updated_at);
             println!("{}: {}", "revision".dimmed(), m.revision_count);
@@ -80,12 +84,7 @@ pub async fn cmd_memory_search(
 
     for m in &results {
         let type_str = m.type_.as_deref().unwrap_or("-");
-        println!(
-            "{} {} [{}]",
-            "•".dimmed(),
-            m.key.cyan(),
-            type_str.yellow(),
-        );
+        println!("{} {} [{}]", "•".dimmed(), m.key.cyan(), type_str.yellow(),);
     }
     println!("\n{} results", results.len());
     Ok(())

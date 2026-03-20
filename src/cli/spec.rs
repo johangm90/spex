@@ -57,7 +57,12 @@ pub async fn cmd_spec_done(pool: &SqlitePool, id: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_spec_list(pool: &SqlitePool, json: bool, limit: Option<i64>, offset: Option<i64>) -> Result<()> {
+pub async fn cmd_spec_list(
+    pool: &SqlitePool,
+    json: bool,
+    limit: Option<i64>,
+    offset: Option<i64>,
+) -> Result<()> {
     let specs = list_specs(pool, limit, offset).await?;
 
     if json {
