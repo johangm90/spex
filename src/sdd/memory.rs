@@ -73,35 +73,27 @@ pub async fn memory_get_full(
     key: &str,
     spec: Option<&str>,
 ) -> Result<Option<Memory>> {
-    let row: Option<Memory> = if let Some(spec) = spec {
-        sqlx::query_as(
-            "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
-                    access_count, last_accessed_at, revision_count \
-             FROM memory \
-             WHERE agent = ? AND key = ? AND spec = ? \
-               AND deleted_at IS NULL \
-               AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-        )
-        .bind(agent)
-        .bind(key)
-        .bind(spec)
-        .fetch_optional(pool)
-        .await?
-    } else {
-        sqlx::query_as(
-            "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
-                    access_count, last_accessed_at, revision_count \
-             FROM memory \
-             WHERE agent = ? AND key = ? \
-               AND deleted_at IS NULL \
-               AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-             ORDER BY updated_at DESC LIMIT 1",
-        )
-        .bind(agent)
-        .bind(key)
-        .fetch_optional(pool)
-        .await?
-    };
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
+                access_count, last_accessed_at, revision_count \
+         FROM memory WHERE agent = ",
+    );
+    qb.push_bind(agent);
+    qb.push(" AND key = ");
+    qb.push_bind(key);
+    if let Some(s) = spec {
+        qb.push(" AND spec = ");
+        qb.push_bind(s);
+    }
+    qb.push(
+        " AND deleted_at IS NULL \
+         AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+    );
+    if spec.is_none() {
+        qb.push(" ORDER BY updated_at DESC LIMIT 1");
+    }
+
+    let row: Option<Memory> = qb.build_query_as().fetch_optional(pool).await?;
 
     if let Some(ref m) = row {
         // Bump access tracking
@@ -229,39 +221,25 @@ pub async fn memory_context(
 ) -> Result<Vec<Memory>> {
     let limit = limit.unwrap_or(10);
 
-    let rows: Vec<Memory> = if let Some(spec) = spec {
-        sqlx::query_as(
-            "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
-                    access_count, last_accessed_at, revision_count \
-             FROM memory \
-             WHERE agent = ? AND spec = ? \
-               AND deleted_at IS NULL \
-               AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-             ORDER BY last_accessed_at DESC, access_count DESC \
-             LIMIT ?",
-        )
-        .bind(agent)
-        .bind(spec)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query_as(
-            "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
-                    access_count, last_accessed_at, revision_count \
-             FROM memory \
-             WHERE agent = ? \
-               AND deleted_at IS NULL \
-               AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-             ORDER BY last_accessed_at DESC, access_count DESC \
-             LIMIT ?",
-        )
-        .bind(agent)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?
-    };
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
+                access_count, last_accessed_at, revision_count \
+         FROM memory WHERE agent = ",
+    );
+    qb.push_bind(agent);
+    if let Some(s) = spec {
+        qb.push(" AND spec = ");
+        qb.push_bind(s);
+    }
+    qb.push(
+        " AND deleted_at IS NULL \
+         AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         ORDER BY last_accessed_at DESC, access_count DESC \
+         LIMIT ",
+    );
+    qb.push_bind(limit);
 
+    let rows: Vec<Memory> = qb.build_query_as().fetch_all(pool).await?;
     Ok(rows)
 }
 
