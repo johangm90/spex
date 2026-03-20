@@ -132,15 +132,15 @@ Per-agent, per-spec KV store. Currently: `memory_set` / `memory_get`. Planned en
 
 1. ~~**`constitution` table** — The `constitution` DB table is vestigial (created in migration but never written). Should a future migration drop it, or repurpose it for structured metadata?~~ **Resolved:** Dropped via migration `20260319100000_drop_vestigial_tables.sql`.
 
-2. **`SpecStatus` enum** — Currently has `#[allow(dead_code)]`. Should it replace the raw string matching in `update_spec_status`, or is it purely for documentation?
+2. ~~**`SpecStatus` enum** — Currently has `#[allow(dead_code)]`. Should it replace the raw string matching in `update_spec_status`, or is it purely for documentation?~~ **Resolved:** `SpecStatus` and `TaskStatus` enums now validate at the MCP boundary; `#[allow(dead_code)]` removed.
 
 3. ~~**`meta` table** — Created in schema but never used. Reserved for project-level metadata (e.g. `project_name`, `spex_version`)? Define or drop.~~ **Resolved:** Dropped via migration `20260319100000_drop_vestigial_tables.sql`.
 
 4. ~~**Dead dependencies** — `minijinja`, `toml`, `indicatif` appear unused in current source. Should they be removed in the next maintenance pass?~~ **Resolved:** Removed from `Cargo.toml`.
 
-5. **Test strategy** — IMP-003 (zero tests) is the highest-risk open item. Should tests live in `tests/integration/` (using `tempfile` for isolated DBs) or inline `#[cfg(test)]` modules? Integration or unit-first?
+5. ~~**Test strategy** — IMP-003 (zero tests) is the highest-risk open item. Should tests live in `tests/integration/` (using `tempfile` for isolated DBs) or inline `#[cfg(test)]` modules? Integration or unit-first?~~ **Resolved:** Inline `#[cfg(test)]` modules with in-memory SQLite pools (`make_pool()`). 69 tests across spec, task, event, artifact, memory, MCP dispatch, and GC.
 
-6. **Memory system evolution** — How deeply should the memory layer evolve toward Engram-style features (FTS5, typed observations, topic keys)? Is this a minor enhancement or a separate slice?
+6. ~~**Memory system evolution** — How deeply should the memory layer evolve toward Engram-style features (FTS5, typed observations, topic keys)? Is this a minor enhancement or a separate slice?~~ **Resolved:** Memory Evolution pass shipped: `memory_list` with filtering/pagination, `memory_gc` with FTS rebuild, `spex memory` CLI, QueryBuilder refactor. 19 MCP tools.
 
 7. ~~**MCP tool alias cleanup** — IMP-008: 27 tool registrations for 14 operations. Should aliases be hidden behind a `--legacy` flag, or kept first-class forever for backward compatibility?~~ **Resolved:** Codebase has 18 tools with no aliases. The "27 registrations" claim was stale.
 
