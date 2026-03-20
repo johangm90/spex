@@ -76,6 +76,8 @@ pub async fn memory_get_full(
     key: &str,
     spec: Option<&str>,
 ) -> Result<Option<Memory>> {
+    let mut tx = pool.begin().await?;
+
     let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
         "SELECT id, agent, key, value, spec, updated_at, type, deleted_at, expires_at, \
                 access_count, last_accessed_at, revision_count, related_to \
@@ -97,10 +99,9 @@ pub async fn memory_get_full(
         qb.push(" ORDER BY updated_at DESC LIMIT 1");
     }
 
-    let row: Option<Memory> = qb.build_query_as().fetch_optional(pool).await?;
+    let row: Option<Memory> = qb.build_query_as().fetch_optional(&mut *tx).await?;
 
     if let Some(ref m) = row {
-        // Bump access tracking
         sqlx::query(
             "UPDATE memory SET \
                access_count = access_count + 1, \
@@ -108,9 +109,11 @@ pub async fn memory_get_full(
              WHERE id = ?",
         )
         .bind(m.id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
     }
+
+    tx.commit().await?;
 
     Ok(row)
 }
@@ -570,6 +573,31 @@ mod tests {
         assert_eq!(
             fourth.access_count, 3,
             "access_count must equal 3 after three reads (observed on the 4th read)"
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_get_full_transactional_bump_sets_last_accessed() {
+        let pool = make_pool().await;
+
+        memory_set(&pool, "alice", "txn-test", "v", None, None, None, None)
+            .await
+            .unwrap();
+
+        let before = memory_get_full(&pool, "alice", "txn-test", None)
+            .await
+            .unwrap()
+            .expect("entry must exist");
+        assert_eq!(before.access_count, 0, "first read returns pre-bump count");
+
+        let after = memory_get_full(&pool, "alice", "txn-test", None)
+            .await
+            .unwrap()
+            .expect("entry must exist");
+        assert_eq!(after.access_count, 1, "second read sees bump from first");
+        assert!(
+            after.last_accessed_at.is_some(),
+            "last_accessed_at must be set after transactional bump"
         );
     }
 
