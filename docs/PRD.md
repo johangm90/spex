@@ -144,4 +144,4 @@ Per-agent, per-spec KV store. Currently: `memory_set` / `memory_get`. Planned en
 
 7. ~~**MCP tool alias cleanup** — IMP-008: 27 tool registrations for 14 operations. Should aliases be hidden behind a `--legacy` flag, or kept first-class forever for backward compatibility?~~ **Resolved:** Codebase has 18 tools with no aliases. The "27 registrations" claim was stale.
 
-8. **Pagination** — IMP-009: `spec list`, `task list`, and `trace` have no limit. At what threshold does this become a real problem, and what pagination style fits a stdio MCP API?
+8. ~~**Pagination** — IMP-009: `spec list`, `task list`, and `trace` have no limit. At what threshold does this become a real problem, and what pagination style fits a stdio MCP API?~~ **Resolved:** `list_specs`, `list_tasks`, and `query_events` all accept `limit`/`offset` pagination. MCP tools `state_slice_get`, `state_task_get`, and `state_event_query` expose these params.
