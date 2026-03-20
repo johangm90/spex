@@ -177,93 +177,33 @@ pub async fn memory_search(
 ) -> Result<Vec<Memory>> {
     let limit = limit.unwrap_or(10);
 
-    // Build SQL dynamically based on optional filters.
-    // FTS5 requires the MATCH clause; additional filters are applied on the joined table.
-    let rows: Vec<Memory> = if let (Some(spec), Some(mem_type)) = (spec, mem_type) {
-        sqlx::query_as(
-            "SELECT m.id, m.agent, m.key, m.value, m.spec, m.updated_at, \
-                    m.type, m.deleted_at, m.expires_at, \
-                    m.access_count, m.last_accessed_at, m.revision_count \
-             FROM memory m \
-             JOIN memory_fts f ON m.rowid = f.rowid \
-             WHERE memory_fts MATCH ? \
-               AND m.agent = ? \
-               AND m.spec = ? \
-               AND m.type = ? \
-               AND m.deleted_at IS NULL \
-               AND (m.expires_at IS NULL OR m.expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-             ORDER BY rank \
-             LIMIT ?",
-        )
-        .bind(query)
-        .bind(agent)
-        .bind(spec)
-        .bind(mem_type)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?
-    } else if let Some(spec) = spec {
-        sqlx::query_as(
-            "SELECT m.id, m.agent, m.key, m.value, m.spec, m.updated_at, \
-                    m.type, m.deleted_at, m.expires_at, \
-                    m.access_count, m.last_accessed_at, m.revision_count \
-             FROM memory m \
-             JOIN memory_fts f ON m.rowid = f.rowid \
-             WHERE memory_fts MATCH ? \
-               AND m.agent = ? \
-               AND m.spec = ? \
-               AND m.deleted_at IS NULL \
-               AND (m.expires_at IS NULL OR m.expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-             ORDER BY rank \
-             LIMIT ?",
-        )
-        .bind(query)
-        .bind(agent)
-        .bind(spec)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?
-    } else if let Some(mem_type) = mem_type {
-        sqlx::query_as(
-            "SELECT m.id, m.agent, m.key, m.value, m.spec, m.updated_at, \
-                    m.type, m.deleted_at, m.expires_at, \
-                    m.access_count, m.last_accessed_at, m.revision_count \
-             FROM memory m \
-             JOIN memory_fts f ON m.rowid = f.rowid \
-             WHERE memory_fts MATCH ? \
-               AND m.agent = ? \
-               AND m.type = ? \
-               AND m.deleted_at IS NULL \
-               AND (m.expires_at IS NULL OR m.expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-             ORDER BY rank \
-             LIMIT ?",
-        )
-        .bind(query)
-        .bind(agent)
-        .bind(mem_type)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query_as(
-            "SELECT m.id, m.agent, m.key, m.value, m.spec, m.updated_at, \
-                    m.type, m.deleted_at, m.expires_at, \
-                    m.access_count, m.last_accessed_at, m.revision_count \
-             FROM memory m \
-             JOIN memory_fts f ON m.rowid = f.rowid \
-             WHERE memory_fts MATCH ? \
-               AND m.agent = ? \
-               AND m.deleted_at IS NULL \
-               AND (m.expires_at IS NULL OR m.expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-             ORDER BY rank \
-             LIMIT ?",
-        )
-        .bind(query)
-        .bind(agent)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?
-    };
+    let mut qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(
+        "SELECT m.id, m.agent, m.key, m.value, m.spec, m.updated_at, \
+                m.type, m.deleted_at, m.expires_at, \
+                m.access_count, m.last_accessed_at, m.revision_count \
+         FROM memory m \
+         JOIN memory_fts f ON m.rowid = f.rowid \
+         WHERE memory_fts MATCH ",
+    );
+    qb.push_bind(query);
+    qb.push(" AND m.agent = ");
+    qb.push_bind(agent);
+    if let Some(s) = spec {
+        qb.push(" AND m.spec = ");
+        qb.push_bind(s);
+    }
+    if let Some(t) = mem_type {
+        qb.push(" AND m.type = ");
+        qb.push_bind(t);
+    }
+    qb.push(
+        " AND m.deleted_at IS NULL \
+           AND (m.expires_at IS NULL OR m.expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         ORDER BY rank \
+         LIMIT ",
+    );
+    qb.push_bind(limit);
+    let rows: Vec<Memory> = qb.build_query_as::<Memory>().fetch_all(pool).await?;
 
     Ok(rows)
 }
@@ -336,54 +276,32 @@ pub async fn memory_context(
 
 /// Returns memory statistics for an agent (optionally scoped to a spec).
 pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) -> Result<Value> {
-    let (where_clause_base, spec_bind): (&str, bool) = if spec.is_some() {
-        (
-            "agent = ? AND spec = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            true,
-        )
-    } else {
-        (
-            "agent = ? AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            false,
-        )
-    };
+    let alive_filter = "deleted_at IS NULL AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))";
 
-    // Total count
-    let total: i64 = if spec_bind {
-        let row: (i64,) = sqlx::query_as(&format!(
-            "SELECT COUNT(*) FROM memory WHERE {where_clause_base}"
-        ))
-        .bind(agent)
-        .bind(spec.unwrap())
-        .fetch_one(pool)
-        .await?;
-        row.0
-    } else {
-        let row: (i64,) = sqlx::query_as(&format!(
-            "SELECT COUNT(*) FROM memory WHERE {where_clause_base}"
-        ))
-        .bind(agent)
-        .fetch_one(pool)
-        .await?;
+    macro_rules! stats_query {
+        ($qb:ident, $select:expr, $suffix:expr) => {{
+            let mut $qb = sqlx::QueryBuilder::<sqlx::Sqlite>::new(format!(
+                "{} FROM memory WHERE agent = ", $select
+            ));
+            $qb.push_bind(agent);
+            if let Some(s) = spec {
+                $qb.push(" AND spec = ");
+                $qb.push_bind(s);
+            }
+            $qb.push(format!(" AND {} {}", alive_filter, $suffix));
+            $qb
+        }};
+    }
+
+    let total: i64 = {
+        let mut qb = stats_query!(qb, "SELECT COUNT(*)", "");
+        let row: (i64,) = qb.build_query_as().fetch_one(pool).await?;
         row.0
     };
 
-    // By type
-    let type_rows: Vec<(Option<String>, i64)> = if spec_bind {
-        sqlx::query_as(&format!(
-            "SELECT type, COUNT(*) as cnt FROM memory WHERE {where_clause_base} GROUP BY type"
-        ))
-        .bind(agent)
-        .bind(spec.unwrap())
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query_as(&format!(
-            "SELECT type, COUNT(*) as cnt FROM memory WHERE {where_clause_base} GROUP BY type"
-        ))
-        .bind(agent)
-        .fetch_all(pool)
-        .await?
+    let type_rows: Vec<(Option<String>, i64)> = {
+        let mut qb = stats_query!(qb, "SELECT type, COUNT(*) as cnt", "GROUP BY type");
+        qb.build_query_as().fetch_all(pool).await?
     };
 
     let mut by_type = serde_json::Map::new();
@@ -392,40 +310,14 @@ pub async fn memory_stats(pool: &SqlitePool, agent: &str, spec: Option<&str>) ->
         by_type.insert(key, Value::Number(cnt.into()));
     }
 
-    // Most accessed key
-    let most_accessed: Option<(String,)> = if spec_bind {
-        sqlx::query_as(&format!(
-            "SELECT key FROM memory WHERE {where_clause_base} ORDER BY access_count DESC LIMIT 1"
-        ))
-        .bind(agent)
-        .bind(spec.unwrap())
-        .fetch_optional(pool)
-        .await?
-    } else {
-        sqlx::query_as(&format!(
-            "SELECT key FROM memory WHERE {where_clause_base} ORDER BY access_count DESC LIMIT 1"
-        ))
-        .bind(agent)
-        .fetch_optional(pool)
-        .await?
+    let most_accessed: Option<(String,)> = {
+        let mut qb = stats_query!(qb, "SELECT key", "ORDER BY access_count DESC LIMIT 1");
+        qb.build_query_as().fetch_optional(pool).await?
     };
 
-    // Last written at
-    let last_written: Option<(String,)> = if spec_bind {
-        sqlx::query_as(&format!(
-            "SELECT updated_at FROM memory WHERE {where_clause_base} ORDER BY updated_at DESC LIMIT 1"
-        ))
-        .bind(agent)
-        .bind(spec.unwrap())
-        .fetch_optional(pool)
-        .await?
-    } else {
-        sqlx::query_as(&format!(
-            "SELECT updated_at FROM memory WHERE {where_clause_base} ORDER BY updated_at DESC LIMIT 1"
-        ))
-        .bind(agent)
-        .fetch_optional(pool)
-        .await?
+    let last_written: Option<(String,)> = {
+        let mut qb = stats_query!(qb, "SELECT updated_at", "ORDER BY updated_at DESC LIMIT 1");
+        qb.build_query_as().fetch_optional(pool).await?
     };
 
     Ok(serde_json::json!({
