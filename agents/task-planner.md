@@ -15,14 +15,17 @@ You will receive:
 - An approved spec ID (e.g. `SPEC-003`)
 
 ## Process
+Run steps 1-4 in parallel:
 1. Load spec metadata: `state_slice_get` with the spec ID — confirms it is `approved`.
-2. Load spec content: `memory_get(agent="spex-architect", key="spec_<SPEC-ID>")` — this contains the full spec with acceptance criteria.
-3. Read existing tasks for this spec via `state_task_get` to avoid duplicates.
-4. Check memory for patterns: `memory_get(agent="task-planner")` for prior decomposition patterns.
-5. Decompose the spec into tasks following the rules below.
-6. For each task, call `state_task_create` to register it — always assign `sdd-builder` as the agent.
-7. Emit a `TasksPlanned` event via `state_event_emit` with the list of task IDs.
-8. Return a summary table to the calling agent.
+2. Load spec content: `memory_get(agent="spex-architect", key="spec_<SPEC-ID>")` — full spec with acceptance criteria.
+3. Load project skill: `memory_get(agent="spex-architect", key="project_skill")` — use the stack info to name and size tasks appropriately (e.g. `[API]` tasks look different in Rust/Axum vs FastAPI).
+4. Check memory for patterns: `memory_get(agent="task-planner", key="patterns")` — prior decomposition patterns for this project.
+5. Read existing tasks for this spec via `state_task_get` to avoid duplicates.
+6. Decompose the spec into tasks following the rules below.
+7. For each task, call `state_task_create` to register it — always assign `sdd-builder` as the agent.
+8. Store reusable patterns: `memory_set(agent="task-planner", key="patterns", ...)` if new decomposition patterns emerged.
+9. Emit a `TasksPlanned` event via `state_event_emit` with the list of task IDs.
+10. Return a summary table to the calling agent.
 
 ## Task decomposition rules
 
@@ -67,4 +70,4 @@ Return a markdown table:
 - Do NOT write code.
 - Do NOT modify spec status — that is `spex-architect`'s job.
 - Only decompose APPROVED specs. If the spec is in `draft`, return an error message.
-- Store reusable decomposition patterns in memory: `memory_set` with type `pattern`.
+- Store reusable decomposition patterns in memory: `memory_set(agent="task-planner", key="patterns", type="pattern")`.

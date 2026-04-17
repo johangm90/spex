@@ -106,10 +106,6 @@ Examples: "Must not increase p99 latency above 200ms", "Must work offline">
 | SPEC-NNN | blocks-this | <why> |
 | External API XYZ | integration | <contract details> |
 
-## Test Plan Reference
-
-See `docs/tests/SPEC-NNN-test-plan.md` for detailed test scenarios.
-
 ## ADR References
 
 | ADR | Decision |

@@ -17,7 +17,7 @@ You will receive:
 - Proposed options (may be 1 or more)
 
 ## Process
-1. Check existing ADRs in `docs/adr/` (or `.opencode/adr/`) to determine the next ADR number.
+1. Check existing ADRs via `state_artifact_register` queries and `docs/adr/` to determine the next ADR number.
 2. Research the tradeoffs using `webfetch` if external references are needed.
 3. Draft the ADR following the template exactly.
 4. Write the file to `docs/adr/ADR-NNN-<slug>.md`.
