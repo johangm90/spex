@@ -1,3 +1,4 @@
+pub mod brief;
 pub mod doctor;
 pub mod mcp_cmd;
 pub mod memory_cmd;

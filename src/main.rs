@@ -6,9 +6,11 @@ mod sdd;
 mod skills_mgr;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 
 use cli::{
+    brief::cmd_brief,
     doctor::cmd_doctor,
     mcp_cmd::{cmd_mcp_serve, cmd_mcp_setup},
     memory_cmd::{cmd_memory_gc, cmd_memory_list, cmd_memory_search, cmd_memory_show},
@@ -86,6 +88,13 @@ pub enum Commands {
         until: Option<String>,
     },
 
+    /// Print a compact project brief for AI session kickoff
+    Brief {
+        /// Output as JSON instead of markdown
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show domain event log
     Trace {
         #[arg(long)]
@@ -118,6 +127,13 @@ pub enum Commands {
         /// Attempt automatic fixes
         #[arg(long)]
         fix: bool,
+    },
+
+    /// Generate shell completion scripts
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
     },
 
     /// Manage agent memory entries
@@ -358,6 +374,11 @@ async fn main() -> Result<()> {
             cmd_pulse(&pool, since.as_deref(), until.as_deref()).await?;
         }
 
+        Commands::Brief { json } => {
+            let pool = open_project_db().await?;
+            cmd_brief(&pool, json).await?;
+        }
+
         Commands::Trace {
             spec,
             agent,
@@ -385,6 +406,10 @@ async fn main() -> Result<()> {
 
         Commands::Doctor { fix } => {
             cmd_doctor(fix).await?;
+        }
+
+        Commands::Completions { shell } => {
+            generate(shell, &mut Cli::command(), "spex", &mut std::io::stdout());
         }
 
         Commands::Memory { cmd } => {
@@ -450,7 +475,7 @@ mod tests {
         let help = render_help(Cli::command());
 
         assert!(
-            help.contains("skill   Bundled agent management"),
+            help.contains("skill") && help.contains("Bundled agent management"),
             "root help must describe the skill command as bundled agent management"
         );
     }

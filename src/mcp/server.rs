@@ -10,8 +10,8 @@ use crate::sdd::{
     artifact::{query_artifacts, register_artifact},
     event::{emit_event, query_events},
     memory::{
-        memory_context, memory_delete, memory_find_referencing, memory_get_full, memory_list,
-        memory_search, memory_set, memory_stats,
+        memory_context, memory_delete, memory_find_referencing, memory_gc, memory_get_full,
+        memory_list, memory_search, memory_set, memory_stats,
     },
     spec::{
         create_spec, get_spec, list_specs, update_spec_ac, update_spec_agents, update_spec_status,
@@ -105,25 +105,27 @@ pub async fn run_mcp_server(pool: Arc<SqlitePool>) -> Result<()> {
         }
 
         let response = match serde_json::from_str::<JsonRpcRequest>(trimmed) {
-            Err(e) => JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e)),
+            Err(e) => Some(JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e))),
             Ok(req) => {
                 let id = req.id.clone();
                 handle_request(&pool, req)
                     .await
-                    .unwrap_or_else(|e| JsonRpcResponse::error(id, -32603, e.to_string()))
+                    .unwrap_or_else(|e| Some(JsonRpcResponse::error(id, -32603, e.to_string())))
             }
         };
 
-        let response_str = serde_json::to_string(&response)?;
-        writer.write_all(response_str.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
-        writer.flush().await?;
+        if let Some(response) = response {
+            let response_str = serde_json::to_string(&response)?;
+            writer.write_all(response_str.as_bytes()).await?;
+            writer.write_all(b"\n").await?;
+            writer.flush().await?;
+        }
     }
 
     Ok(())
 }
 
-async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRpcResponse> {
+async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<Option<JsonRpcResponse>> {
     let id = req.id.clone();
 
     match req.method.as_str() {
@@ -138,19 +140,18 @@ async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRp
                     "version": "0.1.0"
                 }
             });
-            Ok(JsonRpcResponse::success(id, result))
+            Ok(Some(JsonRpcResponse::success(id, result)))
         }
 
         "notifications/initialized" => {
-            // No response needed for notifications, but we still return something
-            // that won't be sent (we can just ignore it in the loop)
-            // Actually for JSON-RPC, notifications have no id, so we shouldn't respond
-            Ok(JsonRpcResponse::success(None, json!(null)))
+            // JSON-RPC 2.0: notifications (no id) must NOT receive a response.
+            // Return None to signal the caller to skip writing to stdout.
+            return Ok(None);
         }
 
         "tools/list" => {
             let tools = build_tools_list();
-            Ok(JsonRpcResponse::success(id, json!({ "tools": tools })))
+            Ok(Some(JsonRpcResponse::success(id, json!({ "tools": tools }))))
         }
 
         "tools/call" => {
@@ -165,19 +166,19 @@ async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRp
 
             let result = dispatch_tool(pool, &tool_name, arguments).await;
             match result {
-                Ok(value) => Ok(JsonRpcResponse::success(id, tool_content(value))),
-                Err(e) => Ok(JsonRpcResponse::success(
+                Ok(value) => Ok(Some(JsonRpcResponse::success(id, tool_content(value)))),
+                Err(e) => Ok(Some(JsonRpcResponse::success(
                     id,
                     tool_error_content(&e.to_string()),
-                )),
+                ))),
             }
         }
 
-        _ => Ok(JsonRpcResponse::error(
+        _ => Ok(Some(JsonRpcResponse::error(
             id,
             -32601,
             format!("Method not found: {}", req.method),
-        )),
+        ))),
     }
 }
 
@@ -685,6 +686,36 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(entries))
         }
 
+        "memory_gc" => {
+            let dry_run = args
+                .get("dry_run")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let result = memory_gc(pool, dry_run).await?;
+            Ok(json!({
+                "deleted_count": result.deleted_count,
+                "expired_count": result.expired_count,
+                "sample_keys": result.sample_keys,
+                "dry_run": dry_run,
+            }))
+        }
+
+        "state_prd_set" => {
+            let content = args
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: content"))?;
+            let project_dir = detect_project_dir();
+            let docs_dir = std::path::Path::new(&project_dir).join("docs");
+            std::fs::create_dir_all(&docs_dir)?;
+            let prd_path = docs_dir.join("PRD.md");
+            std::fs::write(&prd_path, content)?;
+            Ok(json!({
+                "ok": true,
+                "path": prd_path.display().to_string(),
+            }))
+        }
+
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }
@@ -965,6 +996,27 @@ fn build_tools_list() -> Value {
                 },
                 "required": ["target"]
             }
+        },
+        {
+            "name": "memory_gc",
+            "description": "Garbage-collect soft-deleted and TTL-expired memory entries. Use dry_run=true to preview what would be removed without deleting anything.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "dry_run": {"type": "boolean", "description": "If true, report counts without deleting (default: false)", "default": false}
+                }
+            }
+        },
+        {
+            "name": "state_prd_set",
+            "description": "Write or overwrite docs/PRD.md in the project root. Use this to create or update the product requirements document.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "Full markdown content to write to docs/PRD.md"}
+                },
+                "required": ["content"]
+            }
         }
     ])
 }
@@ -1179,7 +1231,7 @@ mod tests {
             params: None,
         };
         let resp = handle_request(&pool, req).await.unwrap();
-        let result = resp.result.expect("expected result");
+        let result = resp.unwrap().result.expect("expected result");
         assert!(result.get("protocolVersion").is_some());
         assert!(result.get("capabilities").is_some());
         assert!(result.get("serverInfo").is_some());
@@ -1195,9 +1247,9 @@ mod tests {
             params: None,
         };
         let resp = handle_request(&pool, req).await.unwrap();
-        let result = resp.result.expect("expected result");
+        let result = resp.unwrap().result.expect("expected result");
         let tools = result["tools"].as_array().expect("tools must be array");
-        assert_eq!(tools.len(), 20, "expected 20 tools, got {}", tools.len());
+        assert_eq!(tools.len(), 22, "expected 22 tools, got {}", tools.len());
     }
 
     #[tokio::test]
@@ -1213,6 +1265,7 @@ mod tests {
             })),
         };
         let resp = handle_request(&pool, req).await.unwrap();
+        let resp = resp.unwrap();
         assert!(resp.error.is_none(), "expected no error");
         let result = resp.result.expect("expected result");
         let content = result["content"].as_array().expect("content must be array");
@@ -1230,6 +1283,7 @@ mod tests {
             params: None,
         };
         let resp = handle_request(&pool, req).await.unwrap();
+        let resp = resp.unwrap();
         assert!(resp.result.is_none(), "expected no result");
         let err = resp.error.expect("expected error");
         assert_eq!(err.code, -32601);
