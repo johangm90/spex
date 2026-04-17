@@ -10,5 +10,8 @@
       "enabled": true,
       "type": "local"
     }
-  }
+  },
+  "instructions": [
+    ".opencode/session-start.md"
+  ]
 }
