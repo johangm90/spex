@@ -26,6 +26,7 @@ Run these in parallel:
 - `state_slice_get` with the spec ID
 - `memory_get(agent="spex-architect", key="spec_<SPEC-ID>")` — full spec with acceptance criteria
 - `memory_get(agent="spex-architect", key="project_skill")` — skill slug if one exists
+- `state_project_context` — project conventions, repo map, and `validation_commands`
 
 ### 2. Load the project skill
 If `project_skill` is set, call the `skill` tool with its slug **before writing any code**:
@@ -33,6 +34,11 @@ If `project_skill` is set, call the `skill` tool with its slug **before writing 
 skill("<slug>")
 ```
 The skill provides the stack conventions, folder layout, test command, lint command, and verification checklist for this project. Follow everything in it.
+
+If project context provides `validation_commands`, use them as the default verification policy unless the loaded skill is more specific:
+- `validation_commands.fast` — quick local confidence while implementing
+- `validation_commands.primary` — default single verification command for task completion
+- `validation_commands.full` — broad verification before handing off higher-risk or user-visible work
 
 If no skill is registered, infer conventions by reading existing source files.
 
@@ -54,6 +60,12 @@ Run the checks from the skill's verification checklist (or the defaults below if
 - [ ] New functionality has test coverage
 - [ ] Implementation matches the acceptance criteria in the spec
 - [ ] No dead code or debug artifacts left behind
+
+Verification policy:
+- Use `validation_commands.fast` during iteration when it gives a faster signal.
+- Use `validation_commands.primary` before marking the task done.
+- Use `validation_commands.full` when the task has broader impact, affects user-visible behavior, or the spec/risk level justifies broader coverage.
+- If the project skill provides a stricter verification checklist or exact command, follow the skill.
 
 ### 6. Close out
 - Update task status to `done` with the output artifact: `state_task_update`.
@@ -78,4 +90,5 @@ If invoked directly by the developer (not via @spex-architect), send the handoff
 - NEVER implement tasks from specs that are not `approved` or `in_progress`.
 - NEVER mark a spec as done — that is `@spex-architect`'s responsibility.
 - If the task scope is ambiguous, ask for clarification before writing code.
+- Prefer `validation_commands.fast|primary|full` from project context over guessed verification commands when no stricter skill guidance exists.
 - Store notable implementation decisions in memory: `memory_set` with type `decision` or `pattern`.

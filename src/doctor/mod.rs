@@ -1,3 +1,6 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
 pub enum CheckStatus {
     Pass,
     Warn,
@@ -33,6 +36,12 @@ pub async fn run_checks() -> Vec<CheckResult> {
 
     // 7. No specs stuck in in_progress
     results.push(check_stuck_specs().await);
+
+    // 8. Bundled or installed agent prompts reference real tools and agents
+    results.push(check_prompt_runtime_consistency());
+
+    // 9. Hard-coded documentation counts match runtime reality
+    results.push(check_documentation_count_drift());
 
     results
 }
@@ -277,6 +286,327 @@ async fn check_stuck_specs() -> CheckResult {
     }
 }
 
+fn check_prompt_runtime_consistency() -> CheckResult {
+    let Some(agent_files) = discover_agent_prompt_files() else {
+        return CheckResult {
+            name: "Prompt/runtime consistency".to_string(),
+            status: CheckStatus::Warn,
+            message: "No bundled or installed agent prompt files found to validate.".to_string(),
+        };
+    };
+
+    let tool_count = crate::mcp::server::canonical_tool_names().len();
+
+    let (bad_tools, bad_agents) = validate_prompt_refs(&agent_files);
+
+    if bad_tools.is_empty() && bad_agents.is_empty() {
+        return CheckResult {
+            name: "Prompt/runtime consistency".to_string(),
+            status: CheckStatus::Pass,
+            message: format!(
+                "Validated {} agent prompt(s) against {} MCP tool(s).",
+                agent_files.len(),
+                tool_count
+            ),
+        };
+    }
+
+    let mut parts = Vec::new();
+    if !bad_tools.is_empty() {
+        parts.push(format!("unknown MCP tools: {}", format_bad_refs(&bad_tools)));
+    }
+    if !bad_agents.is_empty() {
+        parts.push(format!("unknown agent refs: {}", format_bad_refs(&bad_agents)));
+    }
+
+    CheckResult {
+        name: "Prompt/runtime consistency".to_string(),
+        status: CheckStatus::Fail,
+        message: parts.join("; "),
+    }
+}
+
+fn check_documentation_count_drift() -> CheckResult {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let expected_agents = crate::skills_mgr::bundled_agent_names().len();
+    let expected_tools = crate::mcp::server::canonical_tool_names().len();
+    let expected_checks = 9usize;
+
+    let expectations = [
+        CountExpectation {
+            path: root.join("README.md"),
+            needle: "bundled AI agent files",
+            expected: expected_agents,
+            label: "bundled agents",
+        },
+        CountExpectation {
+            path: root.join("docs/PRD.md"),
+            needle: "bundled agent markdown files",
+            expected: expected_agents,
+            label: "bundled agents",
+        },
+        CountExpectation {
+            path: root.join("docs/PRD.md"),
+            needle: "canonical tools",
+            expected: expected_tools,
+            label: "canonical tools",
+        },
+        CountExpectation {
+            path: root.join("docs/PRD.md"),
+            needle: "health checks",
+            expected: expected_checks,
+            label: "health checks",
+        },
+        CountExpectation {
+            path: root.join("docs/adr/ADR-001-architecture.md"),
+            needle: "bundled agent markdown files",
+            expected: expected_agents,
+            label: "bundled agents",
+        },
+        CountExpectation {
+            path: root.join("docs/adr/ADR-001-architecture.md"),
+            needle: "canonical tools",
+            expected: expected_tools,
+            label: "canonical tools",
+        },
+    ];
+
+    let mismatches = validate_doc_count_expectations(&expectations);
+
+    if mismatches.is_empty() {
+        return CheckResult {
+            name: "Documentation count drift".to_string(),
+            status: CheckStatus::Pass,
+            message: format!(
+                "Validated documentation counts for {} bundled agents, {} MCP tools, and {} doctor checks.",
+                expected_agents, expected_tools, expected_checks
+            ),
+        };
+    }
+
+    CheckResult {
+        name: "Documentation count drift".to_string(),
+        status: CheckStatus::Fail,
+        message: mismatches.join("; "),
+    }
+}
+
+struct CountExpectation {
+    path: PathBuf,
+    needle: &'static str,
+    expected: usize,
+    label: &'static str,
+}
+
+fn validate_doc_count_expectations(expectations: &[CountExpectation]) -> Vec<String> {
+    let mut mismatches = Vec::new();
+
+    for expectation in expectations {
+        let raw = match std::fs::read_to_string(&expectation.path) {
+            Ok(raw) => raw,
+            Err(err) => {
+                mismatches.push(format!(
+                    "{}: could not read {}: {}",
+                    expectation.label,
+                    expectation.path.display(),
+                    err
+                ));
+                continue;
+            }
+        };
+
+        let actual = extract_count_for_phrase(&raw, expectation.needle);
+        match actual {
+            Some(actual) if actual == expectation.expected => {}
+            Some(actual) => mismatches.push(format!(
+                "{}: {} says {} but expected {}",
+                expectation.label,
+                expectation.path.display(),
+                actual,
+                expectation.expected
+            )),
+            None => mismatches.push(format!(
+                "{}: {} does not contain a parseable count for '{}'",
+                expectation.label,
+                expectation.path.display(),
+                expectation.needle
+            )),
+        }
+    }
+
+    mismatches
+}
+
+fn extract_count_for_phrase(content: &str, needle: &str) -> Option<usize> {
+    for line in content.lines() {
+        if !line.contains(needle) {
+            continue;
+        }
+        if let Some(value) = first_ascii_number(line) {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn first_ascii_number(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        return line[start..i].parse().ok();
+    }
+    None
+}
+
+fn validate_prompt_refs(
+    agent_files: &BTreeMap<String, PathBuf>,
+) -> (BTreeMap<String, Vec<String>>, BTreeMap<String, Vec<String>>) {
+    let canonical_tools: BTreeSet<String> = crate::mcp::server::canonical_tool_names()
+        .into_iter()
+        .collect();
+    let available_agents: BTreeSet<String> = agent_files
+        .keys()
+        .cloned()
+        .chain(crate::skills_mgr::bundled_agent_names())
+        .collect();
+
+    let mut bad_tools: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut bad_agents: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for (agent_name, path) in agent_files {
+        let Ok(content) = std::fs::read_to_string(path) else {
+            continue;
+        };
+
+        let unknown_tools: Vec<String> = extract_mcp_tool_references(&content)
+            .into_iter()
+            .filter(|tool| !canonical_tools.contains(tool))
+            .collect();
+        if !unknown_tools.is_empty() {
+            bad_tools.insert(agent_name.clone(), unknown_tools);
+        }
+
+        let unknown_agents: Vec<String> = extract_agent_references(&content)
+            .into_iter()
+            .filter(|agent| !available_agents.contains(agent))
+            .collect();
+        if !unknown_agents.is_empty() {
+            bad_agents.insert(agent_name.clone(), unknown_agents);
+        }
+    }
+
+    (bad_tools, bad_agents)
+}
+
+fn discover_agent_prompt_files() -> Option<BTreeMap<String, PathBuf>> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let local_agents_dir = cwd.join("agents");
+    if local_agents_dir.exists() {
+        let files = collect_agent_prompt_files(&local_agents_dir);
+        if !files.is_empty() {
+            return Some(files);
+        }
+    }
+
+    let installed_agents_dir = crate::cli::util::opencode_config_dir()
+        .unwrap_or_default()
+        .join("agents");
+    if installed_agents_dir.exists() {
+        let files = collect_agent_prompt_files(&installed_agents_dir);
+        if !files.is_empty() {
+            return Some(files);
+        }
+    }
+
+    None
+}
+
+fn collect_agent_prompt_files(dir: &Path) -> BTreeMap<String, PathBuf> {
+    let mut files = BTreeMap::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+                continue;
+            }
+            if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
+                files.insert(stem.to_string(), path);
+            }
+        }
+    }
+    files
+}
+
+fn extract_mcp_tool_references(content: &str) -> Vec<String> {
+    extract_prefixed_identifiers(content, &["state_", "memory_"])
+}
+
+fn extract_agent_references(content: &str) -> Vec<String> {
+    let mut refs = BTreeSet::new();
+    let chars: Vec<char> = content.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '@' {
+            i += 1;
+            continue;
+        }
+
+        let start = i + 1;
+        let mut end = start;
+        while end < chars.len() && (chars[end].is_ascii_alphanumeric() || chars[end] == '-' || chars[end] == '_') {
+            end += 1;
+        }
+
+        if end > start {
+            refs.insert(chars[start..end].iter().collect::<String>());
+        }
+        i = end;
+    }
+    refs.into_iter().collect()
+}
+
+fn extract_prefixed_identifiers(content: &str, prefixes: &[&str]) -> Vec<String> {
+    let mut found = BTreeSet::new();
+    let chars: Vec<char> = content.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if !chars[i].is_ascii_lowercase() {
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        let mut end = i;
+        while end < chars.len() && (chars[end].is_ascii_lowercase() || chars[end] == '_') {
+            end += 1;
+        }
+        let token: String = chars[start..end].iter().collect();
+        if prefixes.iter().any(|prefix| token.starts_with(prefix)) {
+            found.insert(token);
+        }
+        i = end;
+    }
+
+    found.into_iter().collect()
+}
+
+fn format_bad_refs(entries: &BTreeMap<String, Vec<String>>) -> String {
+    entries
+        .iter()
+        .map(|(agent, refs)| format!("{}=[{}]", agent, refs.join(", ")))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 /// Attempt automatic fixes for failed/warned checks.
 /// Returns a vec of (check_name, fix_message) describing what was done or why it was skipped.
 pub async fn fix_issues() -> Vec<(String, String)> {
@@ -391,4 +721,106 @@ pub async fn fix_issues() -> Vec<(String, String)> {
     }
 
     results
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn extracts_mcp_tool_references_from_prompt_content() {
+        let content = r#"
+Run `state_snapshot`, then call memory_get(agent="x", key="y") and state_event_query.
+Ignore state_fake_tool and memory_missing_tool later.
+"#;
+
+        let refs = extract_mcp_tool_references(content);
+
+        assert!(refs.contains(&"state_snapshot".to_string()));
+        assert!(refs.contains(&"memory_get".to_string()));
+        assert!(refs.contains(&"state_event_query".to_string()));
+        assert!(refs.contains(&"state_fake_tool".to_string()));
+        assert!(refs.contains(&"memory_missing_tool".to_string()));
+    }
+
+    #[test]
+    fn extracts_agent_references_from_prompt_content() {
+        let content = "Delegate to @debugger, @repo-explorer, or @security-reviewer if needed.";
+
+        let refs = extract_agent_references(content);
+
+        assert!(refs.contains(&"debugger".to_string()));
+        assert!(refs.contains(&"repo-explorer".to_string()));
+        assert!(refs.contains(&"security-reviewer".to_string()));
+    }
+
+    #[test]
+    fn formats_bad_refs_compactly() {
+        let mut bad = BTreeMap::new();
+        bad.insert(
+            "agent-a".to_string(),
+            vec!["state_fake".to_string(), "memory_missing".to_string()],
+        );
+
+        let formatted = format_bad_refs(&bad);
+        assert_eq!(formatted, "agent-a=[state_fake, memory_missing]");
+    }
+
+    #[test]
+    fn extracts_first_ascii_number_from_line() {
+        assert_eq!(first_ascii_number("12 bundled agent markdown files"), Some(12));
+        assert_eq!(first_ascii_number("No count here"), None);
+    }
+
+    #[test]
+    fn extract_count_for_phrase_reads_matching_line() {
+        let content = "foo\n23 canonical tools covering things\nbar\n";
+        assert_eq!(extract_count_for_phrase(content, "canonical tools"), Some(23));
+        assert_eq!(extract_count_for_phrase(content, "health checks"), None);
+    }
+
+    #[test]
+    fn validate_doc_count_expectations_reports_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("README.md");
+        std::fs::write(&file, "12 bundled AI agent files\n").unwrap();
+
+        let expectations = [CountExpectation {
+            path: file,
+            needle: "bundled AI agent files",
+            expected: 99,
+            label: "bundled agents",
+        }];
+
+        let mismatches = validate_doc_count_expectations(&expectations);
+        assert_eq!(mismatches.len(), 1);
+        assert!(mismatches[0].contains("expected 99"));
+    }
+
+    #[test]
+    fn bundled_agent_prompts_match_runtime_tools_and_agent_refs() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let agents_dir = root.join("agents");
+        let agent_files = collect_agent_prompt_files(&agents_dir);
+
+        assert!(
+            !agent_files.is_empty(),
+            "expected bundled agent prompts under {}",
+            agents_dir.display()
+        );
+
+        let (bad_tools, bad_agents) = validate_prompt_refs(&agent_files);
+
+        assert!(
+            bad_tools.is_empty(),
+            "bundled prompts reference unknown MCP tools: {}",
+            format_bad_refs(&bad_tools)
+        );
+        assert!(
+            bad_agents.is_empty(),
+            "bundled prompts reference unknown agents: {}",
+            format_bad_refs(&bad_agents)
+        );
+    }
 }

@@ -16,7 +16,7 @@
 
 - **Specs** are the unit of work — named feature slices with a human-gated lifecycle (`draft → approved → in_progress → done`).
 - **Agents** share state through an embedded **MCP (Model Context Protocol)** server backed by a local SQLite database at `.spex/state.db`.
-- **6 bundled AI agent files** install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs them to `~/.config/opencode/agents`. Separately, `skill-builder` scaffolds custom project skills for your team's stack under `~/.config/opencode/skills/<slug>/SKILL.md`.
+- **12 bundled AI agent files** install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs them to `~/.config/opencode/agents`. Separately, `skill-builder` scaffolds custom project skills for your team's stack under `~/.config/opencode/skills/<slug>/SKILL.md`.
 
 ---
 
@@ -53,7 +53,7 @@ cargo install --path .
 spex new my-project
 cd my-project
 
-# 2. Install the 6 bundled agents into OpenCode
+# 2. Install the bundled agents into OpenCode
 spex setup
 
 # 3. Add and approve a spec
@@ -115,12 +115,18 @@ Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 
 | Agent | Mode | Role |
 |-------|------|------|
-| `spex-architect` | primary | Orchestrates the full SDD workflow — reads the PRD, creates specs, coordinates subagents, gates implementation |
+| `spex-architect` | primary | Primary engineering copilot — inspects, decides, executes low-risk work directly, and uses SDD workflows for larger changes |
 | `spec-writer` | subagent | Drafts complete spec/slice documents with acceptance criteria and open questions |
 | `task-planner` | subagent | Decomposes approved specs into granular, independently verifiable tasks |
 | `adr-writer` | subagent | Captures architecture decisions in MADR format |
 | `sdd-builder` | subagent | Implements tasks from approved specs, runs tests, and marks tasks done |
 | `skill-builder` | subagent | Scaffolds custom spex-compatible agents for any team's tech stack |
+| `repo-explorer` | subagent | Maps the repo quickly and summarizes relevant files, flows, and conventions |
+| `debugger` | subagent | Investigates failures, isolates root causes, and applies or recommends minimal fixes |
+| `reviewer` | subagent | Reviews code for bugs, regressions, risks, and missing tests |
+| `test-writer` | subagent | Adds or updates focused tests for new behavior, bug fixes, and regressions |
+| `release-helper` | subagent | Prepares release readiness checks, PR summaries, and release notes |
+| `security-reviewer` | subagent | Reviews code for auth, secret, input, and permission risks |
 
 > **Need a specialist?** Ask `@spex-architect` to invoke `@skill-builder` and describe your stack. You'll get a custom agent tailored to your conventions in seconds.
 

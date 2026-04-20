@@ -12,6 +12,29 @@ pub fn install_bundled_agents(target_dir: &Path) -> Result<usize> {
     Ok(count)
 }
 
+/// Returns the bundled agent file stems compiled into the binary.
+pub fn bundled_agent_names() -> Vec<String> {
+    let mut names = Vec::new();
+    collect_agent_names(&AGENTS_DIR, &mut names);
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn collect_agent_names(dir: &Dir, names: &mut Vec<String>) {
+    for file in dir.files() {
+        if file.path().extension().and_then(|ext| ext.to_str()) == Some("md") {
+            if let Some(stem) = file.path().file_stem().and_then(|stem| stem.to_str()) {
+                names.push(stem.to_string());
+            }
+        }
+    }
+
+    for subdir in dir.dirs() {
+        collect_agent_names(subdir, names);
+    }
+}
+
 fn copy_dir_recursive(dir: &Dir, target: &Path, count: &mut usize) -> Result<()> {
     for file in dir.files() {
         let dest = target.join(file.path());

@@ -13,6 +13,7 @@ use crate::sdd::{
         memory_context, memory_delete, memory_find_referencing, memory_gc, memory_get_full,
         memory_list, memory_search, memory_set, memory_stats,
     },
+    project_profile::{bootstrap_project_context, inspect_project_at_subpath},
     spec::{
         create_spec, get_spec, list_specs, update_spec_ac, update_spec_agents, update_spec_status,
         SpecStatus,
@@ -191,6 +192,8 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let artifacts = query_artifacts(pool, None, None, None, None).await?;
             let project_dir = detect_project_dir();
             let config_source = detect_config_source(&project_dir);
+            let project_root = Path::new(&project_dir);
+            let project_context = bootstrap_project_context(pool, project_root).await?;
 
             let mut agents: Vec<String> = Vec::new();
             for spec in &specs {
@@ -215,6 +218,12 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             } else {
                 None
             };
+            let subprojects_summary = summarize_subprojects(
+                project_context
+                    .project_profile
+                    .get("subprojects")
+                    .and_then(|v| v.as_array()),
+            );
 
             let mut payload = json!({
                 "specs": specs,
@@ -223,7 +232,12 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 "artifacts": artifacts,
                 "agents": agents,
                 "project_dir": project_dir,
-                "config_source": config_source
+                "config_source": config_source,
+                "active_project": project_context.active_project,
+                "project_profile": project_context.project_profile,
+                "subprojects_summary": subprojects_summary,
+                "repo_map": project_context.repo_map,
+                "validation_commands": project_context.validation_commands
             });
 
             if let Some(ms) = memory_summary {
@@ -242,6 +256,25 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             }
 
             Ok(payload)
+        }
+
+        "state_project_context" => {
+            let project_dir = detect_project_dir();
+            let project_root = Path::new(&project_dir);
+            let subpath = args.get("subpath").and_then(|v| v.as_str());
+            let context = if let Some(subpath) = subpath {
+                inspect_project_at_subpath(project_root, subpath)?
+            } else {
+                bootstrap_project_context(pool, project_root).await?
+            };
+            Ok(json!({
+                "project_dir": project_dir,
+                "subpath": subpath,
+                "active_project": context.active_project,
+                "project_profile": context.project_profile,
+                "repo_map": context.repo_map,
+                "validation_commands": context.validation_commands,
+            }))
         }
 
         "state_slice_get" => {
@@ -720,7 +753,39 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
     }
 }
 
-fn build_tools_list() -> Value {
+fn summarize_subprojects(subprojects: Option<&Vec<Value>>) -> Value {
+    let Some(subprojects) = subprojects else {
+        return json!({
+            "count": 0,
+            "items": []
+        });
+    };
+
+    let items: Vec<Value> = subprojects
+        .iter()
+        .map(|subproject| {
+            json!({
+                "name": subproject.get("name").cloned().unwrap_or(Value::Null),
+                "path": subproject.get("path").cloned().unwrap_or(Value::Null),
+                "workspace_group": subproject.get("workspace_group").cloned().unwrap_or(Value::Null),
+                "languages": subproject.get("languages").cloned().unwrap_or_else(|| json!([])),
+                "frameworks": subproject.get("frameworks").cloned().unwrap_or_else(|| json!([])),
+                "primary_validation": subproject
+                    .get("validation_commands")
+                    .and_then(|v| v.get("primary"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+
+    json!({
+        "count": items.len(),
+        "items": items,
+    })
+}
+
+pub(crate) fn build_tools_list() -> Value {
     json!([
         {
             "name": "state_snapshot",
@@ -742,6 +807,19 @@ fn build_tools_list() -> Value {
                     "id": {"type": "string", "description": "Slice/Spec ID (optional; omit to list all)"},
                     "limit": {"type": "integer", "description": "Max results when listing all (omit for no limit)"},
                     "offset": {"type": "integer", "description": "Skip N results when listing all (requires limit)"}
+                }
+            }
+        },
+        {
+            "name": "state_project_context",
+            "description": "Inspect the current repository, derive active project metadata, repo map, and validation commands, and persist them into architect memory.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subpath": {
+                        "type": "string",
+                        "description": "Optional subdirectory inside the project root to inspect as a specific subproject."
+                    }
                 }
             }
         },
@@ -1021,6 +1099,16 @@ fn build_tools_list() -> Value {
     ])
 }
 
+pub(crate) fn canonical_tool_names() -> Vec<String> {
+    build_tools_list()
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| tool.get("name").and_then(|name| name.as_str()))
+        .map(str::to_string)
+        .collect()
+}
+
 fn detect_project_dir() -> String {
     std::env::current_dir()
         .ok()
@@ -1069,10 +1157,116 @@ mod tests {
         );
         assert!(result.get("artifacts").is_some(), "missing 'artifacts' key");
         assert!(result.get("agents").is_some(), "missing 'agents' key");
+        assert!(result.get("active_project").is_some());
+        assert!(result.get("project_profile").is_some());
+        assert!(result.get("subprojects_summary").is_some());
+        assert!(result.get("repo_map").is_some());
+        assert!(result.get("validation_commands").is_some());
         assert!(
             result.get("memory_stats").is_none(),
             "memory_stats must be absent without agent param"
         );
+    }
+
+    #[tokio::test]
+    async fn state_project_context_persists_bootstrap_memory() {
+        let pool = make_pool().await;
+
+        let result = dispatch_tool(&pool, "state_project_context", json!({}))
+            .await
+            .unwrap();
+
+        assert!(result.get("project_profile").is_some());
+
+        let profile = memory_get_full(&pool, "spex-architect", "project_profile", None)
+            .await
+            .unwrap()
+            .expect("project_profile must be stored");
+        let repo_map = memory_get_full(&pool, "spex-architect", "repo_map", None)
+            .await
+            .unwrap()
+            .expect("repo_map must be stored");
+
+        assert!(!profile.value.is_empty());
+        assert!(!repo_map.value.is_empty());
+    }
+
+    #[tokio::test]
+    async fn state_project_context_supports_subpath() {
+        let pool = make_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"private": true, "workspaces": ["apps/*"]}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.path().join("apps/web/src")).unwrap();
+        std::fs::write(
+            root.path().join("apps/web/package.json"),
+            r#"{"dependencies": {"next": "14.0.0"}, "scripts": {"test": "vitest"}}"#,
+        )
+        .unwrap();
+
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root.path()).unwrap();
+
+        let result = dispatch_tool(&pool, "state_project_context", json!({"subpath": "apps/web"}))
+            .await
+            .unwrap();
+
+        std::env::set_current_dir(previous).unwrap();
+
+        assert_eq!(result.get("subpath").and_then(|v| v.as_str()), Some("apps/web"));
+        assert_eq!(result["active_project"]["name"], "web");
+        assert!(result["project_profile"]["frameworks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "Next.js"));
+        assert_eq!(result["validation_commands"]["primary"], "npm run test");
+    }
+
+    #[tokio::test]
+    async fn state_snapshot_includes_subprojects_summary() {
+        let pool = make_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"private": true, "workspaces": ["apps/*", "packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.path().join("apps/web")).unwrap();
+        std::fs::create_dir_all(root.path().join("packages/core/src")).unwrap();
+        std::fs::write(
+            root.path().join("apps/web/package.json"),
+            r#"{"dependencies": {"next": "14.0.0"}, "scripts": {"test": "vitest"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("packages/core/Cargo.toml"),
+            "[package]\nname='core'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        std::fs::write(root.path().join("packages/core/src/lib.rs"), "pub fn x() {}\n").unwrap();
+
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root.path()).unwrap();
+
+        let result = dispatch_tool(&pool, "state_snapshot", json!({})).await.unwrap();
+
+        std::env::set_current_dir(previous).unwrap();
+
+        assert_eq!(result["subprojects_summary"]["count"], 2);
+        assert!(result["subprojects_summary"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["path"] == "apps/web" && v["primary_validation"] == "npm run test"));
+        assert!(result["subprojects_summary"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["path"] == "packages/core" && v["primary_validation"] == "cargo test"));
     }
 
     #[tokio::test]
@@ -1238,7 +1432,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handle_request_tools_list_has_18_items() {
+    async fn handle_request_tools_list_has_expected_count() {
         let pool = make_pool().await;
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -1249,7 +1443,7 @@ mod tests {
         let resp = handle_request(&pool, req).await.unwrap();
         let result = resp.unwrap().result.expect("expected result");
         let tools = result["tools"].as_array().expect("tools must be array");
-        assert_eq!(tools.len(), 22, "expected 22 tools, got {}", tools.len());
+        assert_eq!(tools.len(), 23, "expected 23 tools, got {}", tools.len());
     }
 
     #[tokio::test]
