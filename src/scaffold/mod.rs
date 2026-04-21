@@ -3,6 +3,7 @@ use colored::Colorize;
 use std::path::Path;
 
 use crate::sdd::db::{ensure_spex_dir, get_db_path, open_db};
+use crate::sdd::project_profile::bootstrap_project_context;
 
 pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
     if !yes {
@@ -74,7 +75,8 @@ pub async fn scaffold_project(name: &str, dir: &Path, yes: bool) -> Result<()> {
 
     // 7. Initialize the SQLite database (runs migrations)
     let db_path = get_db_path(dir);
-    let _pool = open_db(&db_path).await?;
+    let pool = open_db(&db_path).await?;
+    bootstrap_project_context(&pool, dir).await?;
     println!("  {} .spex/state.db", "created".green());
 
     println!();
@@ -195,7 +197,8 @@ pub async fn init_project(dir: &Path) -> Result<()> {
 
     // 5. Initialise the SQLite database (runs migrations)
     let db_path = get_db_path(dir);
-    let _pool = open_db(&db_path).await?;
+    let pool = open_db(&db_path).await?;
+    bootstrap_project_context(&pool, dir).await?;
     println!("  {} .spex/state.db", "created".green());
 
     println!();

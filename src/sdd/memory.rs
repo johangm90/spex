@@ -86,20 +86,28 @@ pub async fn memory_get_full(
     qb.push_bind(agent);
     qb.push(" AND key = ");
     qb.push_bind(key);
-    if let Some(s) = spec {
-        qb.push(" AND (spec = ");
-        qb.push_bind(s);
-        qb.push(" OR spec = '*')");
+    match spec {
+        Some(s) => {
+            qb.push(" AND (spec = ");
+            qb.push_bind(s);
+            qb.push(" OR spec = '*')");
+        }
+        None => {
+            // No spec scope provided: restrict to the unscoped bucket (spec = '')
+            // to prevent leaking entries that belong to a specific spec.
+            qb.push(" AND spec = ''");
+        }
     }
     qb.push(
         " AND deleted_at IS NULL \
-         AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+         AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         ORDER BY updated_at DESC LIMIT 1",
     );
-    if spec.is_none() {
-        qb.push(" ORDER BY updated_at DESC LIMIT 1");
-    }
 
-    let row: Option<Memory> = qb.build_query_as().fetch_optional(&mut *tx).await?;
+    let row: Option<Memory> = qb
+        .build_query_as::<Memory>()
+        .fetch_optional(&mut *tx)
+        .await?;
 
     if let Some(ref m) = row {
         sqlx::query(
@@ -146,8 +154,8 @@ pub async fn memory_list(
     }
     qb.push(
         " AND deleted_at IS NULL \
-           AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
-         ORDER BY key LIMIT ",
+         AND (expires_at IS NULL OR expires_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) \
+         ORDER BY updated_at DESC LIMIT ",
     );
     qb.push_bind(limit);
     qb.push(" OFFSET ");
@@ -201,6 +209,8 @@ pub async fn memory_search(
 }
 
 /// Soft-delete a memory entry. Returns true if a row was affected.
+/// When spec is None, deletes from the unscoped bucket (spec = '').
+/// Pass spec = Some("*") to delete a globally-scoped entry.
 pub async fn memory_delete(
     pool: &SqlitePool,
     agent: &str,

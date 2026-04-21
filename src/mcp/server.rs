@@ -10,9 +10,10 @@ use crate::sdd::{
     artifact::{query_artifacts, register_artifact},
     event::{emit_event, query_events},
     memory::{
-        memory_context, memory_delete, memory_find_referencing, memory_get_full, memory_list,
-        memory_search, memory_set, memory_stats,
+        memory_context, memory_delete, memory_find_referencing, memory_gc, memory_get_full,
+        memory_list, memory_search, memory_set, memory_stats,
     },
+    project_profile::{bootstrap_project_context, inspect_project_at_subpath},
     spec::{
         create_spec, get_spec, list_specs, update_spec_ac, update_spec_agents, update_spec_status,
         SpecStatus,
@@ -105,25 +106,31 @@ pub async fn run_mcp_server(pool: Arc<SqlitePool>) -> Result<()> {
         }
 
         let response = match serde_json::from_str::<JsonRpcRequest>(trimmed) {
-            Err(e) => JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e)),
+            Err(e) => Some(JsonRpcResponse::error(
+                None,
+                -32700,
+                format!("Parse error: {}", e),
+            )),
             Ok(req) => {
                 let id = req.id.clone();
                 handle_request(&pool, req)
                     .await
-                    .unwrap_or_else(|e| JsonRpcResponse::error(id, -32603, e.to_string()))
+                    .unwrap_or_else(|e| Some(JsonRpcResponse::error(id, -32603, e.to_string())))
             }
         };
 
-        let response_str = serde_json::to_string(&response)?;
-        writer.write_all(response_str.as_bytes()).await?;
-        writer.write_all(b"\n").await?;
-        writer.flush().await?;
+        if let Some(response) = response {
+            let response_str = serde_json::to_string(&response)?;
+            writer.write_all(response_str.as_bytes()).await?;
+            writer.write_all(b"\n").await?;
+            writer.flush().await?;
+        }
     }
 
     Ok(())
 }
 
-async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRpcResponse> {
+async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<Option<JsonRpcResponse>> {
     let id = req.id.clone();
 
     match req.method.as_str() {
@@ -138,19 +145,22 @@ async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRp
                     "version": "0.1.0"
                 }
             });
-            Ok(JsonRpcResponse::success(id, result))
+            Ok(Some(JsonRpcResponse::success(id, result)))
         }
 
         "notifications/initialized" => {
-            // No response needed for notifications, but we still return something
-            // that won't be sent (we can just ignore it in the loop)
-            // Actually for JSON-RPC, notifications have no id, so we shouldn't respond
-            Ok(JsonRpcResponse::success(None, json!(null)))
+            // JSON-RPC 2.0: notifications (no id) must NOT receive a response.
+            // Return None to signal the caller to skip writing to stdout.
+            #[allow(clippy::needless_return)]
+            return Ok(None);
         }
 
         "tools/list" => {
             let tools = build_tools_list();
-            Ok(JsonRpcResponse::success(id, json!({ "tools": tools })))
+            Ok(Some(JsonRpcResponse::success(
+                id,
+                json!({ "tools": tools }),
+            )))
         }
 
         "tools/call" => {
@@ -165,19 +175,19 @@ async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<JsonRp
 
             let result = dispatch_tool(pool, &tool_name, arguments).await;
             match result {
-                Ok(value) => Ok(JsonRpcResponse::success(id, tool_content(value))),
-                Err(e) => Ok(JsonRpcResponse::success(
+                Ok(value) => Ok(Some(JsonRpcResponse::success(id, tool_content(value)))),
+                Err(e) => Ok(Some(JsonRpcResponse::success(
                     id,
                     tool_error_content(&e.to_string()),
-                )),
+                ))),
             }
         }
 
-        _ => Ok(JsonRpcResponse::error(
+        _ => Ok(Some(JsonRpcResponse::error(
             id,
             -32601,
             format!("Method not found: {}", req.method),
-        )),
+        ))),
     }
 }
 
@@ -190,6 +200,8 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             let artifacts = query_artifacts(pool, None, None, None, None).await?;
             let project_dir = detect_project_dir();
             let config_source = detect_config_source(&project_dir);
+            let project_root = Path::new(&project_dir);
+            let project_context = bootstrap_project_context(pool, project_root).await?;
 
             let mut agents: Vec<String> = Vec::new();
             for spec in &specs {
@@ -214,6 +226,12 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             } else {
                 None
             };
+            let subprojects_summary = summarize_subprojects(
+                project_context
+                    .project_profile
+                    .get("subprojects")
+                    .and_then(|v| v.as_array()),
+            );
 
             let mut payload = json!({
                 "specs": specs,
@@ -222,7 +240,12 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
                 "artifacts": artifacts,
                 "agents": agents,
                 "project_dir": project_dir,
-                "config_source": config_source
+                "config_source": config_source,
+                "active_project": project_context.active_project,
+                "project_profile": project_context.project_profile,
+                "subprojects_summary": subprojects_summary,
+                "repo_map": project_context.repo_map,
+                "validation_commands": project_context.validation_commands
             });
 
             if let Some(ms) = memory_summary {
@@ -241,6 +264,25 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             }
 
             Ok(payload)
+        }
+
+        "state_project_context" => {
+            let project_dir = detect_project_dir();
+            let project_root = Path::new(&project_dir);
+            let subpath = args.get("subpath").and_then(|v| v.as_str());
+            let context = if let Some(subpath) = subpath {
+                inspect_project_at_subpath(project_root, subpath)?
+            } else {
+                bootstrap_project_context(pool, project_root).await?
+            };
+            Ok(json!({
+                "project_dir": project_dir,
+                "subpath": subpath,
+                "active_project": context.active_project,
+                "project_profile": context.project_profile,
+                "repo_map": context.repo_map,
+                "validation_commands": context.validation_commands,
+            }))
         }
 
         "state_slice_get" => {
@@ -685,11 +727,73 @@ async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Val
             Ok(json!(entries))
         }
 
+        "memory_gc" => {
+            let dry_run = args
+                .get("dry_run")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let result = memory_gc(pool, dry_run).await?;
+            Ok(json!({
+                "deleted_count": result.deleted_count,
+                "expired_count": result.expired_count,
+                "sample_keys": result.sample_keys,
+                "dry_run": dry_run,
+            }))
+        }
+
+        "state_prd_set" => {
+            let content = args
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing field: content"))?;
+            let project_dir = detect_project_dir();
+            let docs_dir = std::path::Path::new(&project_dir).join("docs");
+            std::fs::create_dir_all(&docs_dir)?;
+            let prd_path = docs_dir.join("PRD.md");
+            std::fs::write(&prd_path, content)?;
+            Ok(json!({
+                "ok": true,
+                "path": prd_path.display().to_string(),
+            }))
+        }
+
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }
 
-fn build_tools_list() -> Value {
+fn summarize_subprojects(subprojects: Option<&Vec<Value>>) -> Value {
+    let Some(subprojects) = subprojects else {
+        return json!({
+            "count": 0,
+            "items": []
+        });
+    };
+
+    let items: Vec<Value> = subprojects
+        .iter()
+        .map(|subproject| {
+            json!({
+                "name": subproject.get("name").cloned().unwrap_or(Value::Null),
+                "path": subproject.get("path").cloned().unwrap_or(Value::Null),
+                "workspace_group": subproject.get("workspace_group").cloned().unwrap_or(Value::Null),
+                "languages": subproject.get("languages").cloned().unwrap_or_else(|| json!([])),
+                "frameworks": subproject.get("frameworks").cloned().unwrap_or_else(|| json!([])),
+                "primary_validation": subproject
+                    .get("validation_commands")
+                    .and_then(|v| v.get("primary"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+
+    json!({
+        "count": items.len(),
+        "items": items,
+    })
+}
+
+pub(crate) fn build_tools_list() -> Value {
     json!([
         {
             "name": "state_snapshot",
@@ -711,6 +815,19 @@ fn build_tools_list() -> Value {
                     "id": {"type": "string", "description": "Slice/Spec ID (optional; omit to list all)"},
                     "limit": {"type": "integer", "description": "Max results when listing all (omit for no limit)"},
                     "offset": {"type": "integer", "description": "Skip N results when listing all (requires limit)"}
+                }
+            }
+        },
+        {
+            "name": "state_project_context",
+            "description": "Inspect the current repository, derive active project metadata, repo map, and validation commands, and persist them into architect memory.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subpath": {
+                        "type": "string",
+                        "description": "Optional subdirectory inside the project root to inspect as a specific subproject."
+                    }
                 }
             }
         },
@@ -965,8 +1082,39 @@ fn build_tools_list() -> Value {
                 },
                 "required": ["target"]
             }
+        },
+        {
+            "name": "memory_gc",
+            "description": "Garbage-collect soft-deleted and TTL-expired memory entries. Use dry_run=true to preview what would be removed without deleting anything.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "dry_run": {"type": "boolean", "description": "If true, report counts without deleting (default: false)", "default": false}
+                }
+            }
+        },
+        {
+            "name": "state_prd_set",
+            "description": "Write or overwrite docs/PRD.md in the project root. Use this to create or update the product requirements document.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "Full markdown content to write to docs/PRD.md"}
+                },
+                "required": ["content"]
+            }
         }
     ])
+}
+
+pub(crate) fn canonical_tool_names() -> Vec<String> {
+    build_tools_list()
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| tool.get("name").and_then(|name| name.as_str()))
+        .map(str::to_string)
+        .collect()
 }
 
 fn detect_project_dir() -> String {
@@ -1017,10 +1165,129 @@ mod tests {
         );
         assert!(result.get("artifacts").is_some(), "missing 'artifacts' key");
         assert!(result.get("agents").is_some(), "missing 'agents' key");
+        assert!(result.get("active_project").is_some());
+        assert!(result.get("project_profile").is_some());
+        assert!(result.get("subprojects_summary").is_some());
+        assert!(result.get("repo_map").is_some());
+        assert!(result.get("validation_commands").is_some());
         assert!(
             result.get("memory_stats").is_none(),
             "memory_stats must be absent without agent param"
         );
+    }
+
+    #[tokio::test]
+    async fn state_project_context_persists_bootstrap_memory() {
+        let pool = make_pool().await;
+
+        let result = dispatch_tool(&pool, "state_project_context", json!({}))
+            .await
+            .unwrap();
+
+        assert!(result.get("project_profile").is_some());
+
+        let profile = memory_get_full(&pool, "spex-architect", "project_profile", None)
+            .await
+            .unwrap()
+            .expect("project_profile must be stored");
+        let repo_map = memory_get_full(&pool, "spex-architect", "repo_map", None)
+            .await
+            .unwrap()
+            .expect("repo_map must be stored");
+
+        assert!(!profile.value.is_empty());
+        assert!(!repo_map.value.is_empty());
+    }
+
+    #[tokio::test]
+    async fn state_project_context_supports_subpath() {
+        let pool = make_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"private": true, "workspaces": ["apps/*"]}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.path().join("apps/web/src")).unwrap();
+        std::fs::write(
+            root.path().join("apps/web/package.json"),
+            r#"{"dependencies": {"next": "14.0.0"}, "scripts": {"test": "vitest"}}"#,
+        )
+        .unwrap();
+
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root.path()).unwrap();
+
+        let result = dispatch_tool(
+            &pool,
+            "state_project_context",
+            json!({"subpath": "apps/web"}),
+        )
+        .await
+        .unwrap();
+
+        std::env::set_current_dir(previous).unwrap();
+
+        assert_eq!(
+            result.get("subpath").and_then(|v| v.as_str()),
+            Some("apps/web")
+        );
+        assert_eq!(result["active_project"]["name"], "web");
+        assert!(result["project_profile"]["frameworks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "Next.js"));
+        assert_eq!(result["validation_commands"]["primary"], "npm run test");
+    }
+
+    #[tokio::test]
+    async fn state_snapshot_includes_subprojects_summary() {
+        let pool = make_pool().await;
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"private": true, "workspaces": ["apps/*", "packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.path().join("apps/web")).unwrap();
+        std::fs::create_dir_all(root.path().join("packages/core/src")).unwrap();
+        std::fs::write(
+            root.path().join("apps/web/package.json"),
+            r#"{"dependencies": {"next": "14.0.0"}, "scripts": {"test": "vitest"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("packages/core/Cargo.toml"),
+            "[package]\nname='core'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join("packages/core/src/lib.rs"),
+            "pub fn x() {}\n",
+        )
+        .unwrap();
+
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root.path()).unwrap();
+
+        let result = dispatch_tool(&pool, "state_snapshot", json!({}))
+            .await
+            .unwrap();
+
+        std::env::set_current_dir(previous).unwrap();
+
+        assert_eq!(result["subprojects_summary"]["count"], 2);
+        assert!(result["subprojects_summary"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["path"] == "apps/web" && v["primary_validation"] == "npm run test"));
+        assert!(result["subprojects_summary"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v["path"] == "packages/core" && v["primary_validation"] == "cargo test"));
     }
 
     #[tokio::test]
@@ -1179,14 +1446,14 @@ mod tests {
             params: None,
         };
         let resp = handle_request(&pool, req).await.unwrap();
-        let result = resp.result.expect("expected result");
+        let result = resp.unwrap().result.expect("expected result");
         assert!(result.get("protocolVersion").is_some());
         assert!(result.get("capabilities").is_some());
         assert!(result.get("serverInfo").is_some());
     }
 
     #[tokio::test]
-    async fn handle_request_tools_list_has_18_items() {
+    async fn handle_request_tools_list_has_expected_count() {
         let pool = make_pool().await;
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -1195,9 +1462,9 @@ mod tests {
             params: None,
         };
         let resp = handle_request(&pool, req).await.unwrap();
-        let result = resp.result.expect("expected result");
+        let result = resp.unwrap().result.expect("expected result");
         let tools = result["tools"].as_array().expect("tools must be array");
-        assert_eq!(tools.len(), 20, "expected 20 tools, got {}", tools.len());
+        assert_eq!(tools.len(), 23, "expected 23 tools, got {}", tools.len());
     }
 
     #[tokio::test]
@@ -1213,6 +1480,7 @@ mod tests {
             })),
         };
         let resp = handle_request(&pool, req).await.unwrap();
+        let resp = resp.unwrap();
         assert!(resp.error.is_none(), "expected no error");
         let result = resp.result.expect("expected result");
         let content = result["content"].as_array().expect("content must be array");
@@ -1230,6 +1498,7 @@ mod tests {
             params: None,
         };
         let resp = handle_request(&pool, req).await.unwrap();
+        let resp = resp.unwrap();
         assert!(resp.result.is_none(), "expected no result");
         let err = resp.error.expect("expected error");
         assert_eq!(err.code, -32601);

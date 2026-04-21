@@ -1,5 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/session-start.md"
+  ],
   "mcp": {
     "spex-state": {
       "command": [
