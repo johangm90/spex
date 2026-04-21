@@ -104,7 +104,10 @@ pub async fn memory_get_full(
          ORDER BY updated_at DESC LIMIT 1",
     );
 
-    let row: Option<Memory> = qb.build_query_as::<Memory>().fetch_optional(&mut *tx).await?;
+    let row: Option<Memory> = qb
+        .build_query_as::<Memory>()
+        .fetch_optional(&mut *tx)
+        .await?;
 
     if let Some(ref m) = row {
         sqlx::query(

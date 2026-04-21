@@ -1,5 +1,6 @@
 mod cli;
 mod doctor;
+mod host;
 mod mcp;
 mod scaffold;
 mod sdd;
@@ -46,9 +47,12 @@ pub enum Commands {
 
     /// One-time global setup: install bundled agents and write MCP config
     Setup {
-        /// Write MCP config to global ~/.config/opencode/config.json instead of ./opencode.json
+        /// Write MCP config to global host config instead of ./opencode.json
         #[arg(long)]
         global: bool,
+        /// Target host: opencode (default) or copilot
+        #[arg(long)]
+        host: Option<String>,
     },
 
     /// Bootstrap a new spex project
@@ -115,7 +119,7 @@ pub enum Commands {
 
     #[command(
         about = "Bundled agent management",
-        long_about = "Manage bundled agents installed under ~/.config/opencode/agents/.\n\nThis command group does not manage generated custom skills. Custom skills remain separate `SKILL.md` files under ~/.config/opencode/skills/<slug>/SKILL.md."
+        long_about = "Manage bundled agents installed under the host agents directory.\n\nFor OpenCode: ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/\n\nThis command group does not manage generated custom skills. Custom skills remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
     )]
     Skill {
         #[command(subcommand)]
@@ -217,16 +221,18 @@ pub enum TaskCmd {
     },
 }
 
-// ─── MCP Subcommands ──────────────────────────────────────────────────────────
-
+/// MCP server commands
 #[derive(Subcommand)]
 pub enum McpCmd {
     /// Start MCP stdio server
     Serve,
-    /// Write opencode.json MCP config
+    /// Write MCP config for the target host
     Setup {
         #[arg(long)]
         global: bool,
+        /// Target host: opencode (default) or copilot
+        #[arg(long)]
+        host: Option<String>,
     },
 }
 
@@ -235,15 +241,22 @@ pub enum McpCmd {
 #[derive(Subcommand)]
 pub enum SkillCmd {
     #[command(
-        about = "Install bundled agents to ~/.config/opencode/agents/",
-        long_about = "Install bundled agents to ~/.config/opencode/agents/.\n\nGenerated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.config/opencode/skills/<slug>/SKILL.md."
+        about = "Install bundled agents to the host agents directory",
+        long_about = "Install bundled agents to the host agents directory.\n\nFor OpenCode (default): ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/ (with .agent.md extension)\n\nGenerated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
     )]
     Install {
         #[arg(long)]
         all: bool,
+        /// Target host: opencode (default) or copilot
+        #[arg(long)]
+        host: Option<String>,
     },
     /// List installed bundled agents
-    List,
+    List {
+        /// Target host: opencode (default) or copilot
+        #[arg(long)]
+        host: Option<String>,
+    },
 }
 
 // ─── Memory Subcommands ───────────────────────────────────────────────────────
@@ -297,8 +310,8 @@ async fn main() -> Result<()> {
             scaffold::init_project(&cwd).await?;
         }
 
-        Commands::Setup { global } => {
-            cmd_setup(global).await?;
+        Commands::Setup { global, host } => {
+            cmd_setup(global, host.as_deref()).await?;
         }
 
         Commands::New { name, yes } => {
@@ -394,14 +407,14 @@ async fn main() -> Result<()> {
                 let pool = open_project_db().await?;
                 cmd_mcp_serve(pool).await?;
             }
-            McpCmd::Setup { global } => {
-                cmd_mcp_setup(global)?;
+            McpCmd::Setup { global, host } => {
+                cmd_mcp_setup(global, host.as_deref())?;
             }
         },
 
         Commands::Skill { cmd } => match cmd {
-            SkillCmd::Install { all } => cmd_skill_install(all).await?,
-            SkillCmd::List => cmd_skill_list()?,
+            SkillCmd::Install { all, host } => cmd_skill_install(all, host.as_deref()).await?,
+            SkillCmd::List { host } => cmd_skill_list(host.as_deref())?,
         },
 
         Commands::Doctor { fix } => {
@@ -485,18 +498,18 @@ mod tests {
         let help = render_subcommand_help(&["skill"]);
 
         assert!(
-            help.contains("Manage bundled agents installed under ~/.config/opencode/agents/."),
-            "skill help must point bundled agents to the agents directory"
+            help.contains("Manage bundled agents installed under the host agents directory."),
+            "skill help must describe host agents directory"
         );
         assert!(
             help.contains(
-                "Custom skills remain separate `SKILL.md` files under ~/.config/opencode/skills/<slug>/SKILL.md."
+                "Custom skills remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
             ),
-            "skill help must keep custom skills on the custom-skill path"
+            "skill help must keep custom skills on the shared skills path"
         );
         assert!(
             !help.contains("bundled agents installed under ~/.config/opencode/skills/"),
-            "skill help must not point bundled agents to the skills directory"
+            "skill help must not point bundled agents to the old skills directory"
         );
     }
 
@@ -505,18 +518,18 @@ mod tests {
         let help = render_subcommand_help(&["skill", "install"]);
 
         assert!(
-            help.contains("Install bundled agents to ~/.config/opencode/agents/."),
-            "skill install help must point bundled agents to the agents directory"
+            help.contains("Install bundled agents to the host agents directory"),
+            "skill install help must describe host agents directory"
         );
         assert!(
             help.contains(
-                "Generated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.config/opencode/skills/<slug>/SKILL.md."
+                "Generated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
             ),
-            "skill install help must keep generated custom skills on the custom-skill path"
+            "skill install help must keep generated custom skills on the shared skills path"
         );
         assert!(
             !help.contains("Install bundled agents to ~/.config/opencode/skills/"),
-            "skill install help must not point bundled agents to the skills directory"
+            "skill install help must not point bundled agents to the old skills directory"
         );
     }
 }

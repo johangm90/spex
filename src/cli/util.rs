@@ -9,6 +9,19 @@ pub fn opencode_config_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".config").join("opencode"))
 }
 
+/// Returns the GitHub Copilot CLI config directory: ~/.copilot
+#[allow(dead_code)]
+pub fn copilot_config_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".copilot"))
+}
+
+/// Returns the shared agents/skills directory: ~/.agents/skills
+/// This path is shared between OpenCode and GitHub Copilot CLI.
+#[allow(dead_code)]
+pub fn agents_skills_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".agents").join("skills"))
+}
+
 pub fn colorize_status(status: &str) -> ColoredString {
     match status {
         "draft" => status.white(),

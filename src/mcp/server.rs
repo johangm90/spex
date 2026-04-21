@@ -106,7 +106,11 @@ pub async fn run_mcp_server(pool: Arc<SqlitePool>) -> Result<()> {
         }
 
         let response = match serde_json::from_str::<JsonRpcRequest>(trimmed) {
-            Err(e) => Some(JsonRpcResponse::error(None, -32700, format!("Parse error: {}", e))),
+            Err(e) => Some(JsonRpcResponse::error(
+                None,
+                -32700,
+                format!("Parse error: {}", e),
+            )),
             Ok(req) => {
                 let id = req.id.clone();
                 handle_request(&pool, req)
@@ -147,12 +151,16 @@ async fn handle_request(pool: &SqlitePool, req: JsonRpcRequest) -> Result<Option
         "notifications/initialized" => {
             // JSON-RPC 2.0: notifications (no id) must NOT receive a response.
             // Return None to signal the caller to skip writing to stdout.
+            #[allow(clippy::needless_return)]
             return Ok(None);
         }
 
         "tools/list" => {
             let tools = build_tools_list();
-            Ok(Some(JsonRpcResponse::success(id, json!({ "tools": tools }))))
+            Ok(Some(JsonRpcResponse::success(
+                id,
+                json!({ "tools": tools }),
+            )))
         }
 
         "tools/call" => {
@@ -1210,13 +1218,20 @@ mod tests {
         let previous = std::env::current_dir().unwrap();
         std::env::set_current_dir(root.path()).unwrap();
 
-        let result = dispatch_tool(&pool, "state_project_context", json!({"subpath": "apps/web"}))
-            .await
-            .unwrap();
+        let result = dispatch_tool(
+            &pool,
+            "state_project_context",
+            json!({"subpath": "apps/web"}),
+        )
+        .await
+        .unwrap();
 
         std::env::set_current_dir(previous).unwrap();
 
-        assert_eq!(result.get("subpath").and_then(|v| v.as_str()), Some("apps/web"));
+        assert_eq!(
+            result.get("subpath").and_then(|v| v.as_str()),
+            Some("apps/web")
+        );
         assert_eq!(result["active_project"]["name"], "web");
         assert!(result["project_profile"]["frameworks"]
             .as_array()
@@ -1247,12 +1262,18 @@ mod tests {
             "[package]\nname='core'\nversion='0.1.0'\n",
         )
         .unwrap();
-        std::fs::write(root.path().join("packages/core/src/lib.rs"), "pub fn x() {}\n").unwrap();
+        std::fs::write(
+            root.path().join("packages/core/src/lib.rs"),
+            "pub fn x() {}\n",
+        )
+        .unwrap();
 
         let previous = std::env::current_dir().unwrap();
         std::env::set_current_dir(root.path()).unwrap();
 
-        let result = dispatch_tool(&pool, "state_snapshot", json!({})).await.unwrap();
+        let result = dispatch_tool(&pool, "state_snapshot", json!({}))
+            .await
+            .unwrap();
 
         std::env::set_current_dir(previous).unwrap();
 

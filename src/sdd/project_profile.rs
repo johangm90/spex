@@ -194,7 +194,9 @@ pub fn inspect_project(root: &Path) -> ProjectContext {
 
     if composer.exists() {
         languages.push("PHP".to_string());
-        let raw = std::fs::read_to_string(&composer).unwrap_or_default().to_lowercase();
+        let raw = std::fs::read_to_string(&composer)
+            .unwrap_or_default()
+            .to_lowercase();
         let php_tooling = detect_php_tooling(
             composer_lock.exists(),
             artisan.exists(),
@@ -212,7 +214,9 @@ pub fn inspect_project(root: &Path) -> ProjectContext {
 
     if gemfile.exists() {
         languages.push("Ruby".to_string());
-        let raw = std::fs::read_to_string(&gemfile).unwrap_or_default().to_lowercase();
+        let raw = std::fs::read_to_string(&gemfile)
+            .unwrap_or_default()
+            .to_lowercase();
         let ruby_tooling = detect_ruby_tooling(
             gemfile_lock.exists(),
             rubocop_yml.exists(),
@@ -399,6 +403,7 @@ struct RubyToolingProfile {
     format_command: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn detect_python_tooling(
     root: &Path,
     has_pyproject: bool,
@@ -544,11 +549,7 @@ fn detect_php_tooling(
     dedupe(&mut frameworks);
 
     let test_command = if uses_laravel {
-        if uses_pest {
-            "php artisan test".to_string()
-        } else {
-            "php artisan test".to_string()
-        }
+        "php artisan test".to_string()
     } else if uses_pest {
         "./vendor/bin/pest".to_string()
     } else if uses_phpunit {
@@ -802,16 +803,32 @@ fn derive_primary_validation_command(commands: &Value, ci_profile: &Value) -> Va
         .filter_map(|v| v.as_str())
         .collect();
 
-    if let Some(command) = pick_primary_command(commands.get("test").and_then(|v| v.as_str()), &ci_commands, looks_like_test_command) {
+    if let Some(command) = pick_primary_command(
+        commands.get("test").and_then(|v| v.as_str()),
+        &ci_commands,
+        looks_like_test_command,
+    ) {
         return json!(command);
     }
-    if let Some(command) = pick_primary_command(commands.get("lint").and_then(|v| v.as_str()), &ci_commands, looks_like_lint_command) {
+    if let Some(command) = pick_primary_command(
+        commands.get("lint").and_then(|v| v.as_str()),
+        &ci_commands,
+        looks_like_lint_command,
+    ) {
         return json!(command);
     }
-    if let Some(command) = pick_primary_command(commands.get("build").and_then(|v| v.as_str()), &ci_commands, looks_like_build_command) {
+    if let Some(command) = pick_primary_command(
+        commands.get("build").and_then(|v| v.as_str()),
+        &ci_commands,
+        looks_like_build_command,
+    ) {
         return json!(command);
     }
-    if let Some(command) = pick_primary_command(commands.get("format").and_then(|v| v.as_str()), &ci_commands, looks_like_format_command) {
+    if let Some(command) = pick_primary_command(
+        commands.get("format").and_then(|v| v.as_str()),
+        &ci_commands,
+        looks_like_format_command,
+    ) {
         return json!(command);
     }
 
@@ -861,10 +878,26 @@ fn derive_full_validation_command(commands: &Value, ci_profile: &Value) -> Value
         .filter_map(|v| v.as_str())
         .collect();
 
-    let format = prefer_stronger_ci_command(commands.get("format").and_then(|v| v.as_str()), &ci_commands, looks_like_format_command);
-    let lint = prefer_stronger_ci_command(commands.get("lint").and_then(|v| v.as_str()), &ci_commands, looks_like_lint_command);
-    let build = prefer_stronger_ci_command(commands.get("build").and_then(|v| v.as_str()), &ci_commands, looks_like_build_command);
-    let test = prefer_stronger_ci_command(commands.get("test").and_then(|v| v.as_str()), &ci_commands, looks_like_test_command);
+    let format = prefer_stronger_ci_command(
+        commands.get("format").and_then(|v| v.as_str()),
+        &ci_commands,
+        looks_like_format_command,
+    );
+    let lint = prefer_stronger_ci_command(
+        commands.get("lint").and_then(|v| v.as_str()),
+        &ci_commands,
+        looks_like_lint_command,
+    );
+    let build = prefer_stronger_ci_command(
+        commands.get("build").and_then(|v| v.as_str()),
+        &ci_commands,
+        looks_like_build_command,
+    );
+    let test = prefer_stronger_ci_command(
+        commands.get("test").and_then(|v| v.as_str()),
+        &ci_commands,
+        looks_like_test_command,
+    );
 
     let mut ordered = Vec::new();
     push_unique_command(&mut ordered, format.as_deref());
@@ -879,14 +912,23 @@ fn derive_full_validation_command(commands: &Value, ci_profile: &Value) -> Value
     json!(ordered.join(" && "))
 }
 
-fn pick_primary_command<F>(explicit: Option<&str>, ci_commands: &[&str], predicate: F) -> Option<String>
+fn pick_primary_command<F>(
+    explicit: Option<&str>,
+    ci_commands: &[&str],
+    predicate: F,
+) -> Option<String>
 where
     F: Fn(&str) -> bool,
 {
-    let ci_match = ci_commands.iter().copied().find(|command| predicate(command));
+    let ci_match = ci_commands
+        .iter()
+        .copied()
+        .find(|command| predicate(command));
 
     match (explicit, ci_match) {
-        (_, Some(ci)) if ci.contains("--all-targets") || ci.contains("./...") || ci.contains("-q") => {
+        (_, Some(ci))
+            if ci.contains("--all-targets") || ci.contains("./...") || ci.contains("-q") =>
+        {
             Some(ci.to_string())
         }
         (Some(explicit), _) => Some(explicit.to_string()),
@@ -895,11 +937,18 @@ where
     }
 }
 
-fn prefer_stronger_ci_command<F>(explicit: Option<&str>, ci_commands: &[&str], predicate: F) -> Option<String>
+fn prefer_stronger_ci_command<F>(
+    explicit: Option<&str>,
+    ci_commands: &[&str],
+    predicate: F,
+) -> Option<String>
 where
     F: Fn(&str) -> bool,
 {
-    let ci_match = ci_commands.iter().copied().find(|command| predicate(command));
+    let ci_match = ci_commands
+        .iter()
+        .copied()
+        .find(|command| predicate(command));
 
     match (explicit, ci_match) {
         (_, Some(ci)) if is_stronger_ci_variant(ci) => Some(ci.to_string()),
@@ -929,27 +978,29 @@ fn looks_like_format_command(command: &str) -> bool {
 }
 
 fn looks_like_lint_command(command: &str) -> bool {
-    command.contains("clippy") || command.contains("lint") || command.contains("eslint") || command.contains("ruff check") || command.contains("go vet")
+    command.contains("clippy")
+        || command.contains("lint")
+        || command.contains("eslint")
+        || command.contains("ruff check")
+        || command.contains("go vet")
 }
 
 fn looks_like_build_command(command: &str) -> bool {
-    command.contains(" build") || command.starts_with("build") || command.contains("cargo build") || command.contains("go build")
+    command.contains(" build")
+        || command.starts_with("build")
+        || command.contains("cargo build")
+        || command.contains("go build")
 }
 
 fn looks_like_test_command(command: &str) -> bool {
-    command.contains(" test") || command.starts_with("test") || command.contains("pytest") || command.contains("rspec")
+    command.contains(" test")
+        || command.starts_with("test")
+        || command.contains("pytest")
+        || command.contains("rspec")
 }
 
 fn infer_workspace_packages(root: &Path) -> Vec<String> {
-    collect_existing_paths(
-        root,
-        &[
-            "apps",
-            "packages",
-            "crates",
-            "services",
-        ],
-    )
+    collect_existing_paths(root, &["apps", "packages", "crates", "services"])
 }
 
 fn inspect_workspace_subprojects(root: &Path) -> Vec<Value> {
@@ -1117,7 +1168,10 @@ mod tests {
         assert_eq!(context.project_profile["languages"][0], "Rust");
         assert_eq!(context.validation_commands["test"], "cargo test");
         assert_eq!(context.validation_commands["primary"], "cargo test");
-        assert_eq!(context.validation_commands["fast"], "cargo clippy -- -D warnings");
+        assert_eq!(
+            context.validation_commands["fast"],
+            "cargo clippy -- -D warnings"
+        );
         assert_eq!(
             context.validation_commands["full"],
             "cargo fmt --check && cargo clippy -- -D warnings && cargo build && cargo test"
@@ -1210,7 +1264,10 @@ mod tests {
         let context = inspect_project(dir.path());
 
         assert_eq!(context.active_project["has_ci"], true);
-        assert_eq!(context.active_project["workspace_type"], "javascript-monorepo");
+        assert_eq!(
+            context.active_project["workspace_type"],
+            "javascript-monorepo"
+        );
         assert_eq!(context.project_profile["workspace"]["is_monorepo"], true);
         assert!(context.project_profile["workspace"]["markers"]
             .as_array()
@@ -1268,13 +1325,21 @@ mod tests {
             }"#,
         )
         .unwrap();
-        std::fs::write(dir.path().join("apps/web/src/main.ts"), "console.log('web')\n").unwrap();
+        std::fs::write(
+            dir.path().join("apps/web/src/main.ts"),
+            "console.log('web')\n",
+        )
+        .unwrap();
         std::fs::write(
             dir.path().join("packages/core/Cargo.toml"),
             "[package]\nname='core'\nversion='0.1.0'\n",
         )
         .unwrap();
-        std::fs::write(dir.path().join("packages/core/src/lib.rs"), "pub fn x() {}\n").unwrap();
+        std::fs::write(
+            dir.path().join("packages/core/src/lib.rs"),
+            "pub fn x() {}\n",
+        )
+        .unwrap();
 
         let context = inspect_project(dir.path());
         let subprojects = context.project_profile["subprojects"].as_array().unwrap();
@@ -1283,15 +1348,26 @@ mod tests {
             .iter()
             .find(|v| v["path"] == "apps/web")
             .expect("apps/web subproject");
-        assert!(web["frameworks"].as_array().unwrap().iter().any(|v| v == "Next.js"));
+        assert!(web["frameworks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "Next.js"));
         assert_eq!(web["validation_commands"]["primary"], "npm run test");
 
         let core = subprojects
             .iter()
             .find(|v| v["path"] == "packages/core")
             .expect("packages/core subproject");
-        assert!(core["languages"].as_array().unwrap().iter().any(|v| v == "Rust"));
-        assert_eq!(core["validation_commands"]["fast"], "cargo clippy -- -D warnings");
+        assert!(core["languages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "Rust"));
+        assert_eq!(
+            core["validation_commands"]["fast"],
+            "cargo clippy -- -D warnings"
+        );
     }
 
     #[test]
@@ -1314,7 +1390,10 @@ mod tests {
             .iter()
             .any(|v| v == "cargo-workspace"));
         assert_eq!(context.validation_commands["primary"], "cargo test");
-        assert_eq!(context.validation_commands["fast"], "cargo clippy -- -D warnings");
+        assert_eq!(
+            context.validation_commands["fast"],
+            "cargo clippy -- -D warnings"
+        );
     }
 
     #[test]
@@ -1348,9 +1427,15 @@ ruff = "*"
             .iter()
             .any(|v| v == "FastAPI"));
         assert_eq!(context.validation_commands["test"], "poetry run pytest");
-        assert_eq!(context.validation_commands["lint"], "poetry run ruff check .");
+        assert_eq!(
+            context.validation_commands["lint"],
+            "poetry run ruff check ."
+        );
         assert_eq!(context.validation_commands["primary"], "poetry run pytest");
-        assert_eq!(context.validation_commands["fast"], "poetry run ruff check .");
+        assert_eq!(
+            context.validation_commands["fast"],
+            "poetry run ruff check ."
+        );
         assert_eq!(
             context.validation_commands["full"],
             "poetry run ruff format --check . && poetry run ruff check . && poetry run pytest"
@@ -1388,7 +1473,10 @@ line-length = 100
             .iter()
             .any(|v| v == "nox"));
         assert_eq!(context.validation_commands["test"], "uv run nox");
-        assert_eq!(context.validation_commands["format"], "uv run ruff format --check .");
+        assert_eq!(
+            context.validation_commands["format"],
+            "uv run ruff format --check ."
+        );
         assert_eq!(context.validation_commands["primary"], "uv run nox");
         assert_eq!(context.validation_commands["fast"], "uv run ruff check .");
     }
@@ -1422,9 +1510,15 @@ dependencies = ["pytest", "ruff"]
             .iter()
             .any(|v| v == "tox"));
         assert_eq!(context.validation_commands["test"], "tox");
-        assert_eq!(context.validation_commands["lint"], "hatch run ruff check .");
+        assert_eq!(
+            context.validation_commands["lint"],
+            "hatch run ruff check ."
+        );
         assert_eq!(context.validation_commands["primary"], "tox");
-        assert_eq!(context.validation_commands["fast"], "hatch run ruff check .");
+        assert_eq!(
+            context.validation_commands["fast"],
+            "hatch run ruff check ."
+        );
     }
 
     #[test]
@@ -1465,10 +1559,19 @@ dependencies = ["pytest", "ruff"]
             .iter()
             .any(|v| v == "PHPStan"));
         assert_eq!(context.validation_commands["test"], "php artisan test");
-        assert_eq!(context.validation_commands["lint"], "./vendor/bin/phpstan analyse");
-        assert_eq!(context.validation_commands["format"], "./vendor/bin/pint --test");
+        assert_eq!(
+            context.validation_commands["lint"],
+            "./vendor/bin/phpstan analyse"
+        );
+        assert_eq!(
+            context.validation_commands["format"],
+            "./vendor/bin/pint --test"
+        );
         assert_eq!(context.validation_commands["primary"], "php artisan test");
-        assert_eq!(context.validation_commands["fast"], "./vendor/bin/phpstan analyse");
+        assert_eq!(
+            context.validation_commands["fast"],
+            "./vendor/bin/phpstan analyse"
+        );
     }
 
     #[test]
@@ -1506,9 +1609,18 @@ gem 'rubocop'
             .iter()
             .any(|v| v == "RuboCop"));
         assert_eq!(context.validation_commands["test"], "bundle exec rspec");
-        assert_eq!(context.validation_commands["lint"], "bundle exec rubocop --parallel");
-        assert_eq!(context.validation_commands["format"], "bundle exec rubocop --parallel --format simple");
+        assert_eq!(
+            context.validation_commands["lint"],
+            "bundle exec rubocop --parallel"
+        );
+        assert_eq!(
+            context.validation_commands["format"],
+            "bundle exec rubocop --parallel --format simple"
+        );
         assert_eq!(context.validation_commands["primary"], "bundle exec rspec");
-        assert_eq!(context.validation_commands["fast"], "bundle exec rubocop --parallel");
+        assert_eq!(
+            context.validation_commands["fast"],
+            "bundle exec rubocop --parallel"
+        );
     }
 }

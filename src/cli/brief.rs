@@ -2,7 +2,9 @@ use anyhow::Result;
 use serde_json::json;
 use sqlx::SqlitePool;
 
-use crate::sdd::{event::query_events, memory::memory_get_full, spec::list_specs, task::list_tasks};
+use crate::sdd::{
+    event::query_events, memory::memory_get_full, spec::list_specs, task::list_tasks,
+};
 
 /// `spex brief` — compact project context dump for AI session kickoff.
 ///
@@ -19,10 +21,7 @@ pub async fn cmd_brief(pool: &SqlitePool, json_output: bool) -> Result<()> {
         .unwrap_or(None);
 
     // ── Bucket specs ─────────────────────────────────────────────────────────
-    let active: Vec<_> = specs
-        .iter()
-        .filter(|s| s.status == "in_progress")
-        .collect();
+    let active: Vec<_> = specs.iter().filter(|s| s.status == "in_progress").collect();
     let pending_approval: Vec<_> = specs.iter().filter(|s| s.status == "draft").collect();
     let paused: Vec<_> = specs.iter().filter(|s| s.status == "paused").collect();
     let done_specs: Vec<_> = specs.iter().filter(|s| s.status == "done").collect();

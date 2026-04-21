@@ -22,11 +22,11 @@ pub async fn run_checks() -> Vec<CheckResult> {
     // 2. PRD.md exists and is not the default template
     results.push(check_prd());
 
-    // 3. ~/.config/opencode/skills/ exists
-    results.push(check_skills_dir());
+    // 3. At least one host agents dir exists
+    results.push(check_agents_dir());
 
-    // 4. At least one skill is installed
-    results.push(check_skills_installed());
+    // 4. At least one agent is installed
+    results.push(check_agents_installed());
 
     // 5. opencode.json exists in current dir with spex-state MCP entry
     results.push(check_opencode_json());
@@ -123,64 +123,85 @@ fn check_prd() -> CheckResult {
     }
 }
 
-fn check_skills_dir() -> CheckResult {
-    let agents_dir = crate::cli::util::opencode_config_dir()
-        .unwrap_or_default()
-        .join("agents");
-    if agents_dir.exists() {
+fn check_agents_dir() -> CheckResult {
+    use crate::host::{Host, HostProfile};
+
+    let hosts = [Host::OpenCode, Host::Copilot];
+    let mut found_dirs: Vec<String> = Vec::new();
+
+    for host in &hosts {
+        if let Some(profile) = HostProfile::for_host(host.clone()) {
+            if profile.agents_dir.exists() {
+                found_dirs.push(format!(
+                    "{} ({})",
+                    profile.agents_dir.display(),
+                    host.name()
+                ));
+            }
+        }
+    }
+
+    if found_dirs.is_empty() {
         CheckResult {
             name: "Agents dir".to_string(),
-            status: CheckStatus::Pass,
-            message: format!("{}", agents_dir.display()),
+            status: CheckStatus::Warn,
+            message: "No agents directory found for any host. Run `spex setup`.".to_string(),
         }
     } else {
         CheckResult {
             name: "Agents dir".to_string(),
-            status: CheckStatus::Warn,
-            message: format!("{} not found. Run `spex setup`.", agents_dir.display()),
+            status: CheckStatus::Pass,
+            message: found_dirs.join(", "),
         }
     }
 }
 
-fn check_skills_installed() -> CheckResult {
-    let agents_dir = crate::cli::util::opencode_config_dir()
-        .unwrap_or_default()
-        .join("agents");
+fn check_agents_installed() -> CheckResult {
+    use crate::host::{Host, HostProfile};
 
-    if !agents_dir.exists() {
-        return CheckResult {
-            name: "Agents installed".to_string(),
-            status: CheckStatus::Warn,
-            message: "No agents directory found. Run `spex setup`.".to_string(),
+    let hosts = [Host::OpenCode, Host::Copilot];
+    let mut total = 0usize;
+    let mut details: Vec<String> = Vec::new();
+
+    for host in &hosts {
+        let Some(profile) = HostProfile::for_host(host.clone()) else {
+            continue;
         };
+        if !profile.agents_dir.exists() {
+            continue;
+        }
+        let extension = format!(".{}", profile.agent_extension);
+        let count = std::fs::read_dir(&profile.agents_dir)
+            .map(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| {
+                        e.path()
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .map(|name| name.ends_with(&extension))
+                            .unwrap_or(false)
+                    })
+                    .count()
+            })
+            .unwrap_or(0);
+        if count > 0 {
+            total += count;
+            details.push(format!("{} for {}", count, host.name()));
+        }
     }
 
-    let agents: Vec<String> = match std::fs::read_dir(&agents_dir) {
-        Err(e) => {
-            return CheckResult {
-                name: "Agents installed".to_string(),
-                status: CheckStatus::Fail,
-                message: format!("Error reading agents dir: {}", e),
-            }
-        }
-        Ok(entries) => entries
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("md"))
-            .map(|e| e.file_name().to_string_lossy().to_string())
-            .collect(),
-    };
-
-    if agents.is_empty() {
+    if total == 0 {
         CheckResult {
             name: "Agents installed".to_string(),
             status: CheckStatus::Warn,
-            message: "No agent .md files found. Run `spex setup`.".to_string(),
+            message: "No agent files found for any host. Run `spex setup`.".to_string(),
         }
     } else {
         CheckResult {
             name: "Agents installed".to_string(),
             status: CheckStatus::Pass,
-            message: format!("{} agent(s): {}", agents.len(), agents.join(", ")),
+            message: format!("{} agent(s) total: {}", total, details.join(", ")),
         }
     }
 }
@@ -313,10 +334,16 @@ fn check_prompt_runtime_consistency() -> CheckResult {
 
     let mut parts = Vec::new();
     if !bad_tools.is_empty() {
-        parts.push(format!("unknown MCP tools: {}", format_bad_refs(&bad_tools)));
+        parts.push(format!(
+            "unknown MCP tools: {}",
+            format_bad_refs(&bad_tools)
+        ));
     }
     if !bad_agents.is_empty() {
-        parts.push(format!("unknown agent refs: {}", format_bad_refs(&bad_agents)));
+        parts.push(format!(
+            "unknown agent refs: {}",
+            format_bad_refs(&bad_agents)
+        ));
     }
 
     CheckResult {
@@ -507,6 +534,8 @@ fn validate_prompt_refs(
 }
 
 fn discover_agent_prompt_files() -> Option<BTreeMap<String, PathBuf>> {
+    use crate::host::{Host, HostProfile};
+
     let cwd = std::env::current_dir().unwrap_or_default();
     let local_agents_dir = cwd.join("agents");
     if local_agents_dir.exists() {
@@ -516,13 +545,16 @@ fn discover_agent_prompt_files() -> Option<BTreeMap<String, PathBuf>> {
         }
     }
 
-    let installed_agents_dir = crate::cli::util::opencode_config_dir()
-        .unwrap_or_default()
-        .join("agents");
-    if installed_agents_dir.exists() {
-        let files = collect_agent_prompt_files(&installed_agents_dir);
-        if !files.is_empty() {
-            return Some(files);
+    // Check installed agents for all known hosts
+    let hosts = [Host::OpenCode, Host::Copilot];
+    for host in &hosts {
+        if let Some(profile) = HostProfile::for_host(host.clone()) {
+            if profile.agents_dir.exists() {
+                let files = collect_agent_prompt_files(&profile.agents_dir);
+                if !files.is_empty() {
+                    return Some(files);
+                }
+            }
         }
     }
 
@@ -534,11 +566,22 @@ fn collect_agent_prompt_files(dir: &Path) -> BTreeMap<String, PathBuf> {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(|entry| entry.ok()) {
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+            let name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            // Accept both .md and .agent.md files
+            if !name.ends_with(".md") {
                 continue;
             }
-            if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
-                files.insert(stem.to_string(), path);
+            // Derive a clean stem: strip .agent.md or .md
+            let stem = if name.ends_with(".agent.md") {
+                name.trim_end_matches(".agent.md").to_string()
+            } else {
+                name.trim_end_matches(".md").to_string()
+            };
+            if !stem.is_empty() {
+                files.insert(stem, path);
             }
         }
     }
@@ -561,7 +604,9 @@ fn extract_agent_references(content: &str) -> Vec<String> {
 
         let start = i + 1;
         let mut end = start;
-        while end < chars.len() && (chars[end].is_ascii_alphanumeric() || chars[end] == '-' || chars[end] == '_') {
+        while end < chars.len()
+            && (chars[end].is_ascii_alphanumeric() || chars[end] == '-' || chars[end] == '_')
+        {
             end += 1;
         }
 
@@ -650,16 +695,20 @@ pub async fn fix_issues() -> Vec<(String, String)> {
         }
     }
 
-    // Fix 3: Install agents if missing
-    let agents_dir = crate::cli::util::opencode_config_dir()
-        .unwrap_or_default()
-        .join("agents");
+    // Fix 3: Install agents if missing (OpenCode by default)
+    let agents_dir = crate::host::HostProfile::for_host(crate::host::Host::OpenCode)
+        .map(|p| p.agents_dir)
+        .unwrap_or_else(|| {
+            crate::cli::util::opencode_config_dir()
+                .unwrap_or_default()
+                .join("agents")
+        });
     let agents_missing = !agents_dir.exists()
         || std::fs::read_dir(&agents_dir)
             .map(|mut d| d.next().is_none())
             .unwrap_or(true);
     if agents_missing {
-        match crate::skills_mgr::install_bundled_agents(&agents_dir) {
+        match crate::skills_mgr::install_bundled_agents(&agents_dir, "md") {
             Ok(n) => results.push((
                 "Agents installed".to_string(),
                 format!("Installed {} agent file(s) to {}", n, agents_dir.display()),
@@ -769,14 +818,20 @@ Ignore state_fake_tool and memory_missing_tool later.
 
     #[test]
     fn extracts_first_ascii_number_from_line() {
-        assert_eq!(first_ascii_number("12 bundled agent markdown files"), Some(12));
+        assert_eq!(
+            first_ascii_number("12 bundled agent markdown files"),
+            Some(12)
+        );
         assert_eq!(first_ascii_number("No count here"), None);
     }
 
     #[test]
     fn extract_count_for_phrase_reads_matching_line() {
         let content = "foo\n23 canonical tools covering things\nbar\n";
-        assert_eq!(extract_count_for_phrase(content, "canonical tools"), Some(23));
+        assert_eq!(
+            extract_count_for_phrase(content, "canonical tools"),
+            Some(23)
+        );
         assert_eq!(extract_count_for_phrase(content, "health checks"), None);
     }
 
