@@ -131,12 +131,10 @@ fn check_agents_dir() -> CheckResult {
 
     for host in &hosts {
         if let Some(profile) = HostProfile::for_host(host.clone()) {
-            if profile.agents_dir.exists() {
-                found_dirs.push(format!(
-                    "{} ({})",
-                    profile.agents_dir.display(),
-                    host.name()
-                ));
+            if let Some(agents_dir) = &profile.agents_dir {
+                if agents_dir.exists() {
+                    found_dirs.push(format!("{} ({})", agents_dir.display(), host.name()));
+                }
             }
         }
     }
@@ -167,11 +165,14 @@ fn check_agents_installed() -> CheckResult {
         let Some(profile) = HostProfile::for_host(host.clone()) else {
             continue;
         };
-        if !profile.agents_dir.exists() {
+        let Some(agents_dir) = &profile.agents_dir else {
+            continue;
+        };
+        if !agents_dir.exists() {
             continue;
         }
-        let extension = format!(".{}", profile.agent_extension);
-        let count = std::fs::read_dir(&profile.agents_dir)
+        let extension = format!(".{}", profile.agent_extension.unwrap_or("md"));
+        let count = std::fs::read_dir(agents_dir)
             .map(|entries| {
                 entries
                     .filter_map(|e| e.ok())
@@ -208,38 +209,61 @@ fn check_agents_installed() -> CheckResult {
 
 fn check_opencode_json() -> CheckResult {
     let cwd = std::env::current_dir().unwrap_or_default();
-    let path = cwd.join("opencode.json");
-    if !path.exists() {
-        return CheckResult {
-            name: "opencode.json".to_string(),
-            status: CheckStatus::Warn,
-            message: "opencode.json not found. Run `spex mcp setup`.".to_string(),
-        };
-    }
 
-    match std::fs::read_to_string(&path) {
-        Err(e) => CheckResult {
-            name: "opencode.json".to_string(),
-            status: CheckStatus::Fail,
-            message: format!("Cannot read opencode.json: {}", e),
-        },
-        Ok(content) => {
-            let has_spex = content.contains("spex-state");
-            if has_spex {
-                CheckResult {
-                    name: "opencode.json".to_string(),
-                    status: CheckStatus::Pass,
-                    message: "MCP entry found (spex-state).".to_string(),
-                }
-            } else {
-                CheckResult {
-                    name: "opencode.json".to_string(),
-                    status: CheckStatus::Warn,
-                    message:
-                        "opencode.json exists but missing spex-state entry. Run `spex mcp setup`."
-                            .to_string(),
+    // Check opencode.json (OpenCode / Copilot project config)
+    let opencode_path = cwd.join("opencode.json");
+    // Check .vscode/mcp.json (VS Code project config)
+    let vscode_path = cwd.join(".vscode").join("mcp.json");
+
+    let candidates = [
+        ("opencode.json", &opencode_path),
+        (".vscode/mcp.json", &vscode_path),
+    ];
+
+    let mut found: Vec<String> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+
+    for (label, path) in &candidates {
+        if !path.exists() {
+            missing.push(label.to_string());
+            continue;
+        }
+        match std::fs::read_to_string(path) {
+            Err(e) => {
+                return CheckResult {
+                    name: "MCP project config".to_string(),
+                    status: CheckStatus::Fail,
+                    message: format!("Cannot read {}: {}", label, e),
                 }
             }
+            Ok(content) => {
+                if content.contains("spex-state") {
+                    found.push(label.to_string());
+                } else {
+                    return CheckResult {
+                        name: "MCP project config".to_string(),
+                        status: CheckStatus::Warn,
+                        message: format!(
+                            "{} exists but missing spex-state entry. Run `spex mcp setup`.",
+                            label
+                        ),
+                    };
+                }
+            }
+        }
+    }
+
+    if found.is_empty() {
+        CheckResult {
+            name: "MCP project config".to_string(),
+            status: CheckStatus::Warn,
+            message: "No MCP project config found (opencode.json or .vscode/mcp.json). Run `spex mcp setup`.".to_string(),
+        }
+    } else {
+        CheckResult {
+            name: "MCP project config".to_string(),
+            status: CheckStatus::Pass,
+            message: format!("MCP entry found in: {}", found.join(", ")),
         }
     }
 }
@@ -549,10 +573,12 @@ fn discover_agent_prompt_files() -> Option<BTreeMap<String, PathBuf>> {
     let hosts = [Host::OpenCode, Host::Copilot];
     for host in &hosts {
         if let Some(profile) = HostProfile::for_host(host.clone()) {
-            if profile.agents_dir.exists() {
-                let files = collect_agent_prompt_files(&profile.agents_dir);
-                if !files.is_empty() {
-                    return Some(files);
+            if let Some(agents_dir) = &profile.agents_dir {
+                if agents_dir.exists() {
+                    let files = collect_agent_prompt_files(agents_dir);
+                    if !files.is_empty() {
+                        return Some(files);
+                    }
                 }
             }
         }
@@ -697,7 +723,7 @@ pub async fn fix_issues() -> Vec<(String, String)> {
 
     // Fix 3: Install agents if missing (OpenCode by default)
     let agents_dir = crate::host::HostProfile::for_host(crate::host::Host::OpenCode)
-        .map(|p| p.agents_dir)
+        .and_then(|p| p.agents_dir)
         .unwrap_or_else(|| {
             crate::cli::util::opencode_config_dir()
                 .unwrap_or_default()
@@ -731,16 +757,16 @@ pub async fn fix_issues() -> Vec<(String, String)> {
         match serde_json::to_string_pretty(&config) {
             Ok(json_str) => match std::fs::write(&opencode_path, json_str) {
                 Ok(_) => results.push((
-                    "opencode.json".to_string(),
+                    "MCP project config".to_string(),
                     "Created opencode.json with spex-state MCP entry".to_string(),
                 )),
                 Err(e) => results.push((
-                    "opencode.json".to_string(),
+                    "MCP project config".to_string(),
                     format!("Could not create opencode.json: {}", e),
                 )),
             },
             Err(e) => results.push((
-                "opencode.json".to_string(),
+                "MCP project config".to_string(),
                 format!("Serialization error: {}", e),
             )),
         }

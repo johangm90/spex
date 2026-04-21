@@ -50,7 +50,7 @@ pub enum Commands {
         /// Write MCP config to global host config instead of ./opencode.json
         #[arg(long)]
         global: bool,
-        /// Target host: opencode (default) or copilot
+        /// Target host: opencode, copilot, or vscode (interactive picker if omitted)
         #[arg(long)]
         host: Option<String>,
     },
@@ -119,7 +119,7 @@ pub enum Commands {
 
     #[command(
         about = "Bundled agent management",
-        long_about = "Manage bundled agents installed under the host agents directory.\n\nFor OpenCode: ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/\n\nThis command group does not manage generated custom skills. Custom skills remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
+        long_about = "Manage bundled agents installed under the host agents directory.\n\nFor OpenCode: ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/\nFor VS Code: no per-agent files (MCP config only)\n\nThis command group does not manage generated custom skills. Custom skills remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
     )]
     Skill {
         #[command(subcommand)]
@@ -230,7 +230,7 @@ pub enum McpCmd {
     Setup {
         #[arg(long)]
         global: bool,
-        /// Target host: opencode (default) or copilot
+        /// Target host: opencode (default), copilot, or vscode
         #[arg(long)]
         host: Option<String>,
     },
@@ -242,18 +242,18 @@ pub enum McpCmd {
 pub enum SkillCmd {
     #[command(
         about = "Install bundled agents to the host agents directory",
-        long_about = "Install bundled agents to the host agents directory.\n\nFor OpenCode (default): ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/ (with .agent.md extension)\n\nGenerated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
+        long_about = "Install bundled agents to the host agents directory.\n\nFor OpenCode (default): ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/ (with .agent.md extension)\nFor VS Code: no per-agent files — skipped with an informative message.\n\nGenerated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
     )]
     Install {
         #[arg(long)]
         all: bool,
-        /// Target host: opencode (default) or copilot
+        /// Target host: opencode (default), copilot, or vscode
         #[arg(long)]
         host: Option<String>,
     },
     /// List installed bundled agents
     List {
-        /// Target host: opencode (default) or copilot
+        /// Target host: opencode (default), copilot, or vscode
         #[arg(long)]
         host: Option<String>,
     },

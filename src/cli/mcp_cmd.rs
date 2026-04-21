@@ -33,7 +33,15 @@ pub fn cmd_mcp_setup(global: bool, host: Option<&str>) -> Result<()> {
             }
         }
     } else {
-        std::env::current_dir()?.join("opencode.json")
+        // Project-local path: .vscode/mcp.json for VSCode, opencode.json for others
+        match &resolved_host {
+            Some(profile) if profile.host == crate::host::Host::VSCode => {
+                let vscode_dir = std::env::current_dir()?.join(".vscode");
+                std::fs::create_dir_all(&vscode_dir)?;
+                vscode_dir.join("mcp.json")
+            }
+            _ => std::env::current_dir()?.join("opencode.json"),
+        }
     };
 
     let existing = if path.exists() {
@@ -75,8 +83,12 @@ fn resolve_host(host: Option<&str>) -> Result<Option<HostProfile>> {
     match host {
         None => Ok(None),
         Some(s) => {
-            let h = Host::from_str(s)
-                .ok_or_else(|| anyhow!("Unknown host '{}'. Valid values: opencode, copilot", s))?;
+            let h = Host::from_str(s).ok_or_else(|| {
+                anyhow!(
+                    "Unknown host '{}'. Valid values: opencode, copilot, vscode",
+                    s
+                )
+            })?;
             let profile = HostProfile::for_host(h)
                 .ok_or_else(|| anyhow!("Could not determine home directory"))?;
             Ok(Some(profile))
@@ -196,7 +208,33 @@ mod tests {
 
     #[test]
     fn resolve_host_errors_on_unknown_host() {
-        let result = resolve_host(Some("vscode"));
+        let result = resolve_host(Some("notepad"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_host_returns_profile_for_vscode() {
+        let result = resolve_host(Some("vscode")).unwrap();
+        assert!(result.is_some());
+        let profile = result.unwrap();
+        assert_eq!(profile.mcp_servers_key, "servers");
+        assert!(!profile.mcp_command_is_array);
+    }
+
+    #[test]
+    fn merge_mcp_entries_vscode_format_uses_servers_key() {
+        let config = json!({});
+        let (result, changed) = merge_mcp_entries(config, "servers", false);
+        assert!(changed);
+        let entry = &result["servers"]["spex-state"];
+        assert_eq!(
+            entry["command"].as_str(),
+            Some("spex"),
+            "VSCode format must use string command"
+        );
+        assert!(
+            entry["args"].is_array(),
+            "VSCode format must have args array"
+        );
     }
 }
