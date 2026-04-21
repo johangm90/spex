@@ -43,10 +43,7 @@ fn prompt_host_selection() -> Result<Vec<Host>> {
         return Err(anyhow!("No host selected. Aborting setup."));
     }
 
-    let hosts = ans
-        .into_iter()
-        .filter_map(Host::from_str)
-        .collect();
+    let hosts = ans.into_iter().filter_map(Host::from_str).collect();
     Ok(hosts)
 }
 
@@ -128,7 +125,7 @@ pub fn cmd_skill_list(host: Option<&str>) -> Result<()> {
 }
 
 /// One-time global setup: install agents (if applicable), then write MCP config.
-pub async fn cmd_setup(global: bool, host: Option<&str>) -> Result<()> {
+pub async fn cmd_setup(host: Option<&str>) -> Result<()> {
     println!("{}", "Running one-time spex setup…".bold());
     println!();
 
@@ -166,9 +163,9 @@ pub async fn cmd_setup(global: bool, host: Option<&str>) -> Result<()> {
             );
         }
 
-        // Step 2: Write MCP config
+        // Step 2: Write MCP config — always global for spex setup
         println!();
-        crate::cli::mcp_cmd::cmd_mcp_setup(global, Some(host_name))?;
+        crate::cli::mcp_cmd::cmd_mcp_setup(true, Some(host_name))?;
         println!();
     }
 

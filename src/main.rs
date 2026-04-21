@@ -47,9 +47,6 @@ pub enum Commands {
 
     /// One-time global setup: install bundled agents and write MCP config
     Setup {
-        /// Write MCP config to global host config instead of ./opencode.json
-        #[arg(long)]
-        global: bool,
         /// Target host: opencode, copilot, or vscode (interactive picker if omitted)
         #[arg(long)]
         host: Option<String>,
@@ -310,8 +307,8 @@ async fn main() -> Result<()> {
             scaffold::init_project(&cwd).await?;
         }
 
-        Commands::Setup { global, host } => {
-            cmd_setup(global, host.as_deref()).await?;
+        Commands::Setup { host } => {
+            cmd_setup(host.as_deref()).await?;
         }
 
         Commands::New { name, yes } => {
