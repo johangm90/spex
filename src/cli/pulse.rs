@@ -59,8 +59,7 @@ pub async fn cmd_pulse(pool: &SqlitePool, since: Option<&str>, until: Option<&st
             let total = spec_tasks.len();
             let done = spec_tasks.iter().filter(|t| t.status == "done").count();
 
-            let bar = if total > 0 {
-                let filled = (done * 20) / total;
+            let bar = if let Some(filled) = (done * 20).checked_div(total) {
                 let empty = 20 - filled;
                 format!(
                     "[{}{}]",
