@@ -1,6 +1,6 @@
 [package]
 name = "spex"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "Spec-driven development CLI for AI agent coordination"
 repository = "https://github.com/johangm90/spex"
