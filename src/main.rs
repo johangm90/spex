@@ -1,10 +1,12 @@
 mod cli;
+mod config;
 mod doctor;
 mod host;
 mod mcp;
 mod scaffold;
 mod sdd;
 mod skills_mgr;
+pub mod webhooks;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
@@ -19,13 +21,21 @@ use cli::{
         MemorySetOpts,
     },
     plan::{cmd_plan_build, cmd_plan_show},
+    policy::{
+        cmd_policy_approval_approve, cmd_policy_approval_list, cmd_policy_approval_reject,
+        cmd_policy_config_list, cmd_policy_config_set, cmd_policy_config_show,
+        cmd_policy_evidence_record_validation, cmd_policy_evidence_show,
+        cmd_policy_evidence_submit,
+    },
     pulse::cmd_pulse,
+    session::{cmd_session_end, cmd_session_list, cmd_session_start},
     skill_cmd::{cmd_setup, cmd_skill_install, cmd_skill_list},
     spec::{
         cmd_spec_add, cmd_spec_approve, cmd_spec_done, cmd_spec_list, cmd_spec_show, cmd_spec_start,
     },
     task::{cmd_task_add, cmd_task_done, cmd_task_fail, cmd_task_list, cmd_task_start},
     trace::cmd_trace,
+    workspace::cmd_workspace_status,
 };
 use sdd::db::open_project_db;
 
@@ -50,7 +60,7 @@ pub enum Commands {
 
     /// One-time global setup: install bundled agents and write MCP config
     Setup {
-        /// Target host: opencode, copilot, or vscode (interactive picker if omitted)
+        /// Target host: opencode, copilot, vscode, or pi (interactive picker if omitted)
         #[arg(long)]
         host: Option<String>,
     },
@@ -82,6 +92,12 @@ pub enum Commands {
         cmd: TaskCmd,
     },
 
+    /// Manage policy configs, evidence bundles, and approvals
+    Policy {
+        #[command(subcommand)]
+        cmd: PolicyCmd,
+    },
+
     /// Show project status dashboard
     Pulse {
         /// Show events since this timestamp or duration (e.g. 2026-01-01 or 1h)
@@ -106,6 +122,10 @@ pub enum Commands {
         #[arg(long)]
         agent: Option<String>,
         #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        full: bool,
+        #[arg(long)]
         limit: Option<i64>,
         #[arg(long)]
         offset: Option<i64>,
@@ -119,7 +139,7 @@ pub enum Commands {
 
     #[command(
         about = "Bundled agent management",
-        long_about = "Manage bundled agents installed under the host agents directory.\n\nFor OpenCode: ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/\nFor VS Code: no per-agent files (MCP config only)\n\nThis command group does not manage generated custom skills. Custom skills remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
+        long_about = "Manage bundled agents installed under the host agents directory.\n\nFor OpenCode: ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/\nFor VS Code: no per-agent files (MCP config only)\nFor Pi / pi-subagents: ~/.pi/agent/agents/\n\nThis command group does not manage generated custom skills. Custom skills remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
     )]
     Skill {
         #[command(subcommand)]
@@ -144,6 +164,18 @@ pub enum Commands {
     Memory {
         #[command(subcommand)]
         cmd: MemoryCmd,
+    },
+
+    /// Query status across multiple spex workspaces (read-only)
+    Workspace {
+        #[command(subcommand)]
+        cmd: WorkspaceCmd,
+    },
+
+    /// Manage agent/human work sessions
+    Session {
+        #[command(subcommand)]
+        cmd: SessionCmd,
     },
 }
 
@@ -204,9 +236,17 @@ pub enum TaskCmd {
         output_artifact: Option<String>,
     },
     /// Start a task
-    Start { id: String },
+    Start {
+        id: String,
+        #[arg(long)]
+        updated_by: String,
+    },
     /// Mark task as done
-    Done { id: String },
+    Done {
+        id: String,
+        #[arg(long)]
+        updated_by: String,
+    },
     /// Mark task as failed
     Fail { id: String },
     /// List tasks
@@ -218,6 +258,150 @@ pub enum TaskCmd {
         limit: Option<i64>,
         #[arg(long)]
         offset: Option<i64>,
+    },
+}
+
+// ─── Policy Subcommands ───────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum PolicyCmd {
+    /// Manage persisted policy configs
+    Config {
+        #[command(subcommand)]
+        cmd: PolicyConfigCmd,
+    },
+    /// Submit or inspect evidence bundles
+    Evidence {
+        #[command(subcommand)]
+        cmd: PolicyEvidenceCmd,
+    },
+    /// Inspect or decide pending approvals
+    Approval {
+        #[command(subcommand)]
+        cmd: PolicyApprovalCmd,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PolicyConfigCmd {
+    /// Create or update a policy config by ID
+    Set {
+        id: String,
+        #[arg(long, value_parser = ["project", "spec", "task"])]
+        scope: String,
+        /// Scope reference; omit for project scope
+        #[arg(long)]
+        scope_ref: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+        #[arg(long, default_value = "enforced", value_parser = ["advisory", "enforced"])]
+        mode: String,
+        #[arg(long)]
+        disabled: bool,
+        /// Inline policy rules JSON object
+        #[arg(long)]
+        rules_json: Option<String>,
+        /// Path to a file containing the policy rules JSON object
+        #[arg(long)]
+        rules_file: Option<String>,
+        #[arg(long)]
+        rationale: Option<String>,
+        #[arg(long, default_value = "human")]
+        by: String,
+    },
+    /// List policy configs
+    List {
+        #[arg(long, value_parser = ["project", "spec", "task"])]
+        scope: Option<String>,
+        #[arg(long)]
+        scope_ref: Option<String>,
+        #[arg(long)]
+        agent: Option<String>,
+    },
+    /// Show one policy config
+    Show { id: String },
+}
+
+#[derive(Subcommand)]
+pub enum PolicyEvidenceCmd {
+    /// Create or update a submitted evidence bundle
+    Submit {
+        id: String,
+        #[arg(long)]
+        spec: String,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        behavior_change: bool,
+        /// Inline evidence metadata JSON object
+        #[arg(long)]
+        metadata_json: Option<String>,
+        /// Repeat as --artifact <ARTIFACT_ID[:supporting|primary_output|test_evidence]>
+        #[arg(long)]
+        artifact: Vec<String>,
+        /// Repeat as --validation <RUN_ID[:fast|primary|full|custom]>
+        #[arg(long)]
+        validation: Vec<String>,
+        #[arg(long, default_value = "human")]
+        by: String,
+    },
+    /// Show a submitted evidence bundle and linked refs
+    Show { id: String },
+    /// Record a validation run and attach it to an evidence bundle
+    RecordValidation {
+        /// Unique ID for this validation run
+        id: String,
+        /// Evidence bundle to attach to
+        #[arg(long)]
+        bundle: String,
+        /// Validation alias: fast|primary|full|custom
+        #[arg(long, default_value = "full")]
+        alias: String,
+        /// Shell command that was run
+        #[arg(long)]
+        command: Option<String>,
+        /// Whether the run passed
+        #[arg(long, default_value_t = true)]
+        passed: bool,
+        /// Optional exit code
+        #[arg(long)]
+        exit_code: Option<i64>,
+        /// Optional output summary
+        #[arg(long)]
+        output: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PolicyApprovalCmd {
+    /// List approvals, pending first
+    List {
+        #[arg(long, value_parser = ["task", "spec", "operation"])]
+        entity_kind: Option<String>,
+        #[arg(long)]
+        entity_id: Option<String>,
+        #[arg(long)]
+        operation: Option<String>,
+        #[arg(long, value_parser = ["pending", "approved", "rejected", "cancelled", "expired"])]
+        status: Option<String>,
+    },
+    /// Approve a pending approval request
+    Approve {
+        id: String,
+        #[arg(long, default_value = "human")]
+        by: String,
+        #[arg(long)]
+        reason: Option<String>,
+    },
+    /// Reject a pending approval request
+    Reject {
+        id: String,
+        #[arg(long, default_value = "human")]
+        by: String,
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 
@@ -242,18 +426,18 @@ pub enum McpCmd {
 pub enum SkillCmd {
     #[command(
         about = "Install bundled agents to the host agents directory",
-        long_about = "Install bundled agents to the host agents directory.\n\nFor OpenCode (default): ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/ (with .agent.md extension)\nFor VS Code: no per-agent files — skipped with an informative message.\n\nGenerated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
+        long_about = "Install bundled agents to the host agents directory.\n\nFor OpenCode (default): ~/.config/opencode/agents/\nFor GitHub Copilot CLI: ~/.copilot/agents/ (with .agent.md extension)\nFor VS Code: no per-agent files — skipped with an informative message.\nFor Pi / pi-subagents: ~/.pi/agent/agents/\n\nGenerated custom skills are not installed by this command; they remain separate `SKILL.md` files under ~/.agents/skills/<slug>/SKILL.md."
     )]
     Install {
         #[arg(long)]
         all: bool,
-        /// Target host: opencode (default), copilot, or vscode
+        /// Target host: opencode (default), copilot, vscode, or pi
         #[arg(long)]
         host: Option<String>,
     },
     /// List installed bundled agents
     List {
-        /// Target host: opencode (default), copilot, or vscode
+        /// Target host: opencode (default), copilot, vscode, or pi
         #[arg(long)]
         host: Option<String>,
     },
@@ -334,6 +518,62 @@ pub enum MemoryCmd {
     },
 }
 
+// ─── Workspace Subcommands ────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum WorkspaceCmd {
+    /// Show status summary for one or more spex project paths
+    Status {
+        /// Paths to spex project roots (each must contain .spex/state.db)
+        #[arg(required = true)]
+        paths: Vec<String>,
+    },
+    /// (placeholder — workspace commands are read-only in v1)
+    #[command(hide = true)]
+    Other,
+}
+
+// ─── Session Subcommands ──────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum SessionCmd {
+    /// Start a new session
+    Start {
+        /// Agent identifier
+        #[arg(long)]
+        agent: String,
+        /// Scope to a spec ID
+        #[arg(long)]
+        spec: Option<String>,
+        /// Scope to a task ID
+        #[arg(long)]
+        task: Option<String>,
+        /// Host/environment identifier
+        #[arg(long)]
+        host: Option<String>,
+        /// Free-form notes
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// End an active session
+    End {
+        /// Session ID to end
+        session_id: String,
+    },
+    /// List sessions
+    List {
+        /// Filter by spec ID
+        #[arg(long)]
+        spec: Option<String>,
+        /// Filter by agent
+        #[arg(long)]
+        agent: Option<String>,
+        /// Show only active (not yet ended) sessions
+        #[arg(long)]
+        active: bool,
+    },
+}
+
 // ─── Entry Point ──────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -406,8 +646,10 @@ async fn main() -> Result<()> {
                     )
                     .await?
                 }
-                TaskCmd::Start { id } => cmd_task_start(&pool, &id).await?,
-                TaskCmd::Done { id } => cmd_task_done(&pool, &id).await?,
+                TaskCmd::Start { id, updated_by } => {
+                    cmd_task_start(&pool, &id, &updated_by).await?
+                }
+                TaskCmd::Done { id, updated_by } => cmd_task_done(&pool, &id, &updated_by).await?,
                 TaskCmd::Fail { id } => cmd_task_fail(&pool, &id).await?,
                 TaskCmd::List {
                     spec_id,
@@ -415,6 +657,127 @@ async fn main() -> Result<()> {
                     limit,
                     offset,
                 } => cmd_task_list(&pool, spec_id.as_deref(), json, limit, offset).await?,
+            }
+        }
+
+        Commands::Policy { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                PolicyCmd::Config { cmd } => match cmd {
+                    PolicyConfigCmd::Set {
+                        id,
+                        scope,
+                        scope_ref,
+                        agent,
+                        mode,
+                        disabled,
+                        rules_json,
+                        rules_file,
+                        rationale,
+                        by,
+                    } => {
+                        cmd_policy_config_set(
+                            &pool,
+                            &id,
+                            &scope,
+                            scope_ref.as_deref(),
+                            agent.as_deref(),
+                            &mode,
+                            !disabled,
+                            rules_json.as_deref(),
+                            rules_file.as_deref(),
+                            rationale.as_deref(),
+                            &by,
+                        )
+                        .await?
+                    }
+                    PolicyConfigCmd::List {
+                        scope,
+                        scope_ref,
+                        agent,
+                    } => {
+                        cmd_policy_config_list(
+                            &pool,
+                            scope.as_deref(),
+                            scope_ref.as_deref(),
+                            agent.as_deref(),
+                        )
+                        .await?
+                    }
+                    PolicyConfigCmd::Show { id } => cmd_policy_config_show(&pool, &id).await?,
+                },
+                PolicyCmd::Evidence { cmd } => match cmd {
+                    PolicyEvidenceCmd::Submit {
+                        id,
+                        spec,
+                        task,
+                        summary,
+                        behavior_change,
+                        metadata_json,
+                        artifact,
+                        validation,
+                        by,
+                    } => {
+                        cmd_policy_evidence_submit(
+                            &pool,
+                            &id,
+                            &spec,
+                            task.as_deref(),
+                            summary.as_deref(),
+                            behavior_change,
+                            metadata_json.as_deref(),
+                            &artifact,
+                            &validation,
+                            &by,
+                        )
+                        .await?
+                    }
+                    PolicyEvidenceCmd::Show { id } => cmd_policy_evidence_show(&pool, &id).await?,
+                    PolicyEvidenceCmd::RecordValidation {
+                        id,
+                        bundle,
+                        alias,
+                        command,
+                        passed,
+                        exit_code,
+                        output,
+                    } => {
+                        cmd_policy_evidence_record_validation(
+                            &pool,
+                            &id,
+                            &bundle,
+                            &alias,
+                            command.as_deref(),
+                            passed,
+                            exit_code,
+                            output.as_deref(),
+                        )
+                        .await?
+                    }
+                },
+                PolicyCmd::Approval { cmd } => match cmd {
+                    PolicyApprovalCmd::List {
+                        entity_kind,
+                        entity_id,
+                        operation,
+                        status,
+                    } => {
+                        cmd_policy_approval_list(
+                            &pool,
+                            entity_kind.as_deref(),
+                            entity_id.as_deref(),
+                            operation.as_deref(),
+                            status.as_deref(),
+                        )
+                        .await?
+                    }
+                    PolicyApprovalCmd::Approve { id, by, reason } => {
+                        cmd_policy_approval_approve(&pool, &id, &by, reason.as_deref()).await?
+                    }
+                    PolicyApprovalCmd::Reject { id, by, reason } => {
+                        cmd_policy_approval_reject(&pool, &id, &by, reason.as_deref()).await?
+                    }
+                },
             }
         }
 
@@ -431,11 +794,22 @@ async fn main() -> Result<()> {
         Commands::Trace {
             spec,
             agent,
+            task,
+            full,
             limit,
             offset,
         } => {
             let pool = open_project_db().await?;
-            cmd_trace(&pool, spec.as_deref(), agent.as_deref(), limit, offset).await?;
+            cmd_trace(
+                &pool,
+                spec.as_deref(),
+                agent.as_deref(),
+                task.as_deref(),
+                full,
+                limit,
+                offset,
+            )
+            .await?;
         }
 
         Commands::Mcp { cmd } => match cmd {
@@ -532,6 +906,43 @@ async fn main() -> Result<()> {
                 MemoryCmd::Gc { dry_run } => cmd_memory_gc(&pool, dry_run).await?,
             }
         }
+
+        Commands::Workspace { cmd } => match cmd {
+            WorkspaceCmd::Status { paths } => cmd_workspace_status(&paths).await?,
+            WorkspaceCmd::Other => {
+                eprintln!("workspace commands are read-only in v1");
+                std::process::exit(1);
+            }
+        },
+
+        Commands::Session { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                SessionCmd::Start {
+                    agent,
+                    spec,
+                    task,
+                    host,
+                    notes,
+                } => {
+                    cmd_session_start(
+                        &pool,
+                        &agent,
+                        spec.as_deref(),
+                        task.as_deref(),
+                        host.as_deref(),
+                        notes.as_deref(),
+                    )
+                    .await?
+                }
+                SessionCmd::End { session_id } => cmd_session_end(&pool, &session_id).await?,
+                SessionCmd::List {
+                    spec,
+                    agent,
+                    active,
+                } => cmd_session_list(&pool, spec.as_deref(), agent.as_deref(), active).await?,
+            }
+        }
     }
 
     Ok(())
@@ -610,6 +1021,38 @@ mod tests {
         assert!(
             !help.contains("Install bundled agents to ~/.config/opencode/skills/"),
             "skill install help must not point bundled agents to the old skills directory"
+        );
+    }
+
+    #[test]
+    fn policy_help_exposes_config_evidence_and_approval_groups() {
+        let help = render_subcommand_help(&["policy"]);
+
+        assert!(
+            help.contains("config"),
+            "policy help must list config subcommands"
+        );
+        assert!(
+            help.contains("evidence"),
+            "policy help must list evidence subcommands"
+        );
+        assert!(
+            help.contains("approval"),
+            "policy help must list approval subcommands"
+        );
+    }
+
+    #[test]
+    fn policy_evidence_submit_help_documents_attachment_syntax() {
+        let help = render_subcommand_help(&["policy", "evidence", "submit"]);
+
+        assert!(
+            help.contains("ARTIFACT_ID[:supporting|primary_output|test_evidence]"),
+            "policy evidence submit help must document artifact attachment syntax"
+        );
+        assert!(
+            help.contains("RUN_ID[:fast|primary|full|custom]"),
+            "policy evidence submit help must document validation attachment syntax"
         );
     }
 }

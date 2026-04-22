@@ -1,4 +1,5 @@
 ---
+name: sdd-builder
 description: SDD implementation agent — executes a specific task from an approved spec. Reads task details from spex-state, loads the project skill if available, implements the code, runs tests, and updates task status. Only invoked for tasks in approved specs.
 mode: subagent
 temperature: 0.1

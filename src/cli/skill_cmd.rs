@@ -10,7 +10,7 @@ fn resolve_host_profile(host: Option<&str>) -> Result<HostProfile> {
         None => Host::OpenCode,
         Some(s) => Host::from_str(s).ok_or_else(|| {
             anyhow!(
-                "Unknown host '{}'. Valid values: opencode, copilot, vscode",
+                "Unknown host '{}'. Valid values: opencode, copilot, vscode, pi",
                 s
             )
         })?,
@@ -23,7 +23,7 @@ fn resolve_host_profile(host: Option<&str>) -> Result<HostProfile> {
 fn prompt_host_selection() -> Result<Vec<Host>> {
     let detected = crate::host::detect_installed_hosts();
 
-    let options = vec!["opencode", "copilot", "vscode"];
+    let options = vec!["opencode", "copilot", "vscode", "pi"];
     let defaults: Vec<bool> = options
         .iter()
         .map(|name| detected.iter().any(|h| h.name() == *name))
@@ -164,8 +164,16 @@ pub async fn cmd_setup(host: Option<&str>) -> Result<()> {
         }
 
         // Step 2: Write MCP config — always global for spex setup
-        println!();
-        crate::cli::mcp_cmd::cmd_mcp_setup(true, Some(host_name))?;
+        if profile.supports_mcp {
+            println!();
+            crate::cli::mcp_cmd::cmd_mcp_setup(true, Some(host_name))?;
+        } else {
+            println!(
+                "  {} {} uses agents only — skipping MCP config.",
+                "•".dimmed(),
+                host_name
+            );
+        }
         println!();
     }
 
@@ -188,6 +196,10 @@ pub async fn cmd_setup(host: Option<&str>) -> Result<()> {
                 "You can now use VS Code with the spex MCP server. Open any project where you have run {} or {}.",
                 "spex init".cyan(),
                 "spex new".cyan()
+            ),
+            Host::Pi => format!(
+                "You can now use Pi / pi-subagents with the bundled spex agents installed under {}.",
+                "~/.pi/agent/agents".cyan()
             ),
         };
         println!("{}", hint);

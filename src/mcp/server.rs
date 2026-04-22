@@ -654,7 +654,7 @@ mod tests {
         let resp = handle_request(&pool, req).await.unwrap();
         let result = resp.unwrap().result.expect("expected result");
         let tools = result["tools"].as_array().expect("tools must be array");
-        assert_eq!(tools.len(), 23, "expected 23 tools, got {}", tools.len());
+        assert_eq!(tools.len(), 33, "expected 33 tools, got {}", tools.len());
     }
 
     #[tokio::test]

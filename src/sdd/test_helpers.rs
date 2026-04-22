@@ -11,3 +11,8 @@ pub async fn make_pool() -> SqlitePool {
         .expect("failed to run migrations");
     pool
 }
+
+/// Alias for [`make_pool`] — used by tests that follow the `open_test_db` naming convention.
+pub async fn open_test_db() -> SqlitePool {
+    make_pool().await
+}

@@ -1,4 +1,5 @@
 ---
+name: task-planner
 description: SDD task planner — decomposes an approved spec into granular, implementable tasks with clear inputs, outputs and agent assignments. Invoked by spex-architect after spec approval.
 mode: subagent
 temperature: 0.2

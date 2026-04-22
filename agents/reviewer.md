@@ -1,4 +1,5 @@
 ---
+name: reviewer
 description: Code review specialist — reviews code and changesets for bugs, regressions, risky assumptions, and missing tests. Findings first.
 mode: subagent
 temperature: 0.1

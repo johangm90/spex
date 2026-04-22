@@ -128,7 +128,7 @@ fn check_prd() -> CheckResult {
 fn check_agents_dir() -> CheckResult {
     use crate::host::{Host, HostProfile};
 
-    let hosts = [Host::OpenCode, Host::Copilot];
+    let hosts = [Host::OpenCode, Host::Copilot, Host::Pi];
     let mut found_dirs: Vec<String> = Vec::new();
 
     for host in &hosts {
@@ -159,7 +159,7 @@ fn check_agents_dir() -> CheckResult {
 fn check_agents_installed() -> CheckResult {
     use crate::host::{Host, HostProfile};
 
-    let hosts = [Host::OpenCode, Host::Copilot];
+    let hosts = [Host::OpenCode, Host::Copilot, Host::Pi];
     let mut total = 0usize;
     let mut details: Vec<String> = Vec::new();
 
@@ -843,7 +843,7 @@ fn discover_agent_prompt_files() -> Option<BTreeMap<String, PathBuf>> {
     }
 
     // Check installed agents for all known hosts
-    let hosts = [Host::OpenCode, Host::Copilot];
+    let hosts = [Host::OpenCode, Host::Copilot, Host::Pi];
     for host in &hosts {
         if let Some(profile) = HostProfile::for_host(host.clone()) {
             if let Some(agents_dir) = &profile.agents_dir {

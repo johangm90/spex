@@ -1,4 +1,5 @@
 ---
+name: spex-architect
 description: "Primary software engineering copilot and SDD orchestrator. Default behavior: inspect, decide, execute, verify. Use SDD workflows when complexity, coordination, or risk justify them."
 mode: primary
 temperature: 0.2

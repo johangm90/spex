@@ -1,7 +1,11 @@
 #![allow(dead_code)]
 
+#[path = "../src/config.rs"]
+mod config;
 #[path = "../src/sdd/mod.rs"]
 mod sdd;
+#[path = "../src/webhooks.rs"]
+mod webhooks;
 
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -11,7 +15,14 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Output, Stdio};
 use tempfile::TempDir;
 
 use sdd::{
+    artifact::register_artifact,
     event::query_events,
+    evidence::{
+        attach_artifact_to_evidence_bundle, attach_validation_run_to_evidence_bundle,
+        create_evidence_bundle, record_validation_run, EvidenceArtifactRole, EvidenceBundleStatus,
+        EvidenceRef, NewEvidenceBundle, RecordedValidationRun, ValidationCommandAlias,
+        ValidationRequirementLevel, ValidationRunSource,
+    },
     spec::{create_spec, get_spec, update_spec_ac},
     task::{create_task, get_task},
     workflow::{approve_spec, start_spec},
@@ -154,7 +165,9 @@ async fn cli_spec_done_surfaces_invariant_failure_without_partial_persistence() 
     create_spec(&pool, "SPEC-CLI", "CLI invariant", "P0", &[])
         .await
         .unwrap();
-    approve_spec(&pool, "SPEC-CLI", "human").await.unwrap();
+    approve_spec(&pool, "SPEC-CLI", "human", None)
+        .await
+        .unwrap();
     start_spec(&pool, "SPEC-CLI", "human").await.unwrap();
     create_task(
         &pool,
@@ -248,6 +261,52 @@ async fn mcp_lifecycle_mutations_surface_shared_workflow_events() {
     assert!(!task_started.is_error);
     assert_eq!(task_started.payload["status"], "in_progress");
 
+    let pool = open_pool(root.path()).await;
+    create_evidence_bundle(
+        &pool,
+        NewEvidenceBundle {
+            id: "bundle-mcp",
+            reference: EvidenceRef::for_task("SPEC-MCP", "TASK-MCP"),
+            status: EvidenceBundleStatus::Submitted,
+            summary: Some("Recorded MCP completion evidence"),
+            behavior_change: false,
+            metadata_json: json!({}),
+            created_by: Some("mcp-agent"),
+            updated_by: Some("mcp-agent"),
+        },
+    )
+    .await
+    .unwrap();
+    let ran_at = chrono::Utc::now().to_rfc3339();
+    record_validation_run(
+        &pool,
+        RecordedValidationRun {
+            id: "validation-mcp",
+            evidence_bundle_id: None,
+            reference: EvidenceRef::for_task("SPEC-MCP", "TASK-MCP"),
+            command_alias: ValidationCommandAlias::Primary,
+            command: "cargo test --all-targets",
+            source: ValidationRunSource::Recorded,
+            exit_code: Some(0),
+            success: true,
+            ran_at: &ran_at,
+            recorded_by: Some("mcp-agent"),
+            output_summary: Some("all tests passed"),
+            metadata_json: json!({"recorded_only": true}),
+        },
+    )
+    .await
+    .unwrap();
+    attach_validation_run_to_evidence_bundle(
+        &pool,
+        "bundle-mcp",
+        "validation-mcp",
+        ValidationRequirementLevel::Primary,
+    )
+    .await
+    .unwrap();
+    pool.close().await;
+
     let task_done = session.call_tool(
         "state_task_update",
         json!({"id": "TASK-MCP", "status": "done"}),
@@ -261,6 +320,73 @@ async fn mcp_lifecycle_mutations_surface_shared_workflow_events() {
     );
     assert!(!ac_updated.is_error);
     assert_eq!(ac_updated.payload["ac_passed"], 1);
+
+    let pool = open_pool(root.path()).await;
+    register_artifact(
+        &pool,
+        "artifact-mcp",
+        Some("SPEC-MCP"),
+        Some("TASK-MCP"),
+        "mcp-agent",
+        "source",
+        Some("src/sdd/workflow.rs"),
+        Some("MCP spec completion artifact"),
+        None,
+    )
+    .await
+    .unwrap();
+    create_evidence_bundle(
+        &pool,
+        NewEvidenceBundle {
+            id: "bundle-spec-mcp",
+            reference: EvidenceRef::for_spec("SPEC-MCP"),
+            status: EvidenceBundleStatus::Submitted,
+            summary: Some("Spec completion evidence"),
+            behavior_change: false,
+            metadata_json: json!({}),
+            created_by: Some("mcp-agent"),
+            updated_by: Some("mcp-agent"),
+        },
+    )
+    .await
+    .unwrap();
+    attach_artifact_to_evidence_bundle(
+        &pool,
+        "bundle-spec-mcp",
+        "artifact-mcp",
+        EvidenceArtifactRole::PrimaryOutput,
+    )
+    .await
+    .unwrap();
+    let full_ran_at = chrono::Utc::now().to_rfc3339();
+    record_validation_run(
+        &pool,
+        RecordedValidationRun {
+            id: "validation-spec-mcp",
+            evidence_bundle_id: None,
+            reference: EvidenceRef::for_spec("SPEC-MCP"),
+            command_alias: ValidationCommandAlias::Full,
+            command: "cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-targets && cargo test --all-targets",
+            source: ValidationRunSource::Recorded,
+            exit_code: Some(0),
+            success: true,
+            ran_at: &full_ran_at,
+            recorded_by: Some("mcp-agent"),
+            output_summary: Some("full validation passed"),
+            metadata_json: json!({"recorded_only": true}),
+        },
+    )
+    .await
+    .unwrap();
+    attach_validation_run_to_evidence_bundle(
+        &pool,
+        "bundle-spec-mcp",
+        "validation-spec-mcp",
+        ValidationRequirementLevel::Full,
+    )
+    .await
+    .unwrap();
+    pool.close().await;
 
     let done = session.call_tool(
         "state_slice_update",

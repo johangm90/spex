@@ -1,4 +1,5 @@
 ---
+name: adr-writer
 description: SDD architecture decision recorder — documents architectural decisions (ADRs) triggered during spec or implementation work. Produces structured ADR markdown files and registers them in spex-state.
 mode: subagent
 temperature: 0.2

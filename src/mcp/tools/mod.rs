@@ -2,7 +2,9 @@ mod args;
 mod artifacts;
 mod lifecycle;
 mod memory;
+mod policy;
 mod project;
+mod sessions;
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -33,11 +35,21 @@ pub(crate) async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) ->
         "memory_find_related" => memory::handle_find_related(pool, args).await,
         "memory_gc" => memory::handle_gc(pool, args).await,
         "state_prd_set" => project::handle_prd_set(pool, args).await,
+        "policy_config_set" => policy::handle_config_set(pool, args).await,
+        "policy_config_get" => policy::handle_config_get(pool, args).await,
+        "policy_evidence_add" => policy::handle_evidence_add(pool, args).await,
+        "policy_evidence_list" => policy::handle_evidence_list(pool, args).await,
+        "policy_approval_request" => policy::handle_approval_request(pool, args).await,
+        "policy_approval_decide" => policy::handle_approval_decide(pool, args).await,
+        "policy_approval_list" => policy::handle_approval_list(pool, args).await,
+        "state_session_start" | "state_session_end" | "state_sessions_list" => {
+            sessions::handle(pool, name, &args).await.unwrap()
+        }
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }
 
-pub(crate) fn build_tools_list() -> Value {
+fn build_static_tools_list() -> Value {
     json!([
         {
             "name": "state_snapshot",
@@ -349,6 +361,14 @@ pub(crate) fn build_tools_list() -> Value {
             }
         }
     ])
+}
+
+pub(crate) fn build_tools_list() -> Value {
+    let mut base = build_static_tools_list();
+    let arr = base.as_array_mut().expect("tools list must be array");
+    arr.extend(policy::tool_descriptors());
+    arr.extend(sessions::tool_descriptors());
+    base
 }
 
 pub(crate) fn canonical_tool_names() -> Vec<String> {

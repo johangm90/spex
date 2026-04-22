@@ -1,4 +1,5 @@
 ---
+name: skill-builder
 description: spex skill builder — creates a project-specific skill that teaches sdd-builder how to work with the team's stack and conventions. Invoked by spex-architect when a project needs custom implementation guidance.
 mode: subagent
 temperature: 0.3

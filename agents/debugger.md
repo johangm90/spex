@@ -1,4 +1,5 @@
 ---
+name: debugger
 description: Debugging specialist — investigates failures, reproduces issues when feasible, isolates likely root causes, and recommends or implements the smallest safe fix.
 mode: subagent
 temperature: 0.1

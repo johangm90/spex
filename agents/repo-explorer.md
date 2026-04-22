@@ -1,4 +1,5 @@
 ---
+name: repo-explorer
 description: Repository exploration specialist — maps the codebase, finds relevant files, and summarizes architecture, entry points, and conventions for the caller.
 mode: subagent
 temperature: 0.1

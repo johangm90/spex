@@ -488,6 +488,71 @@ mod tests {
             .unwrap();
         update_spec_ac(&pool, "SPEC-QG3", 3, 3).await.unwrap();
 
+        crate::sdd::artifact::register_artifact(
+            &pool,
+            "artifact-spec-qg3",
+            Some("SPEC-QG3"),
+            None,
+            "agent",
+            "source",
+            Some("src/sdd/spec.rs"),
+            Some("Spec evidence artifact"),
+            None,
+        )
+        .await
+        .unwrap();
+        crate::sdd::evidence::create_evidence_bundle(
+            &pool,
+            crate::sdd::evidence::NewEvidenceBundle {
+                id: "bundle-spec-qg3",
+                reference: crate::sdd::evidence::EvidenceRef::for_spec("SPEC-QG3"),
+                status: crate::sdd::evidence::EvidenceBundleStatus::Submitted,
+                summary: Some("Spec completion evidence"),
+                behavior_change: false,
+                metadata_json: serde_json::json!({}),
+                created_by: Some("agent"),
+                updated_by: Some("agent"),
+            },
+        )
+        .await
+        .unwrap();
+        crate::sdd::evidence::attach_artifact_to_evidence_bundle(
+            &pool,
+            "bundle-spec-qg3",
+            "artifact-spec-qg3",
+            crate::sdd::evidence::EvidenceArtifactRole::PrimaryOutput,
+        )
+        .await
+        .unwrap();
+        let ran_at = Utc::now().to_rfc3339();
+        crate::sdd::evidence::record_validation_run(
+            &pool,
+            crate::sdd::evidence::RecordedValidationRun {
+                id: "validation-spec-qg3",
+                evidence_bundle_id: None,
+                reference: crate::sdd::evidence::EvidenceRef::for_spec("SPEC-QG3"),
+                command_alias: crate::sdd::evidence::ValidationCommandAlias::Full,
+                command: "cargo fmt --all -- --check && cargo clippy --all-targets --all-features -- -D warnings && cargo build --all-targets && cargo test --all-targets",
+                source: crate::sdd::evidence::ValidationRunSource::Recorded,
+                exit_code: Some(0),
+                success: true,
+                ran_at: &ran_at,
+                recorded_by: Some("agent"),
+                output_summary: Some("all checks passed"),
+                metadata_json: serde_json::json!({"recorded_only": true}),
+            },
+        )
+        .await
+        .unwrap();
+        crate::sdd::evidence::attach_validation_run_to_evidence_bundle(
+            &pool,
+            "bundle-spec-qg3",
+            "validation-spec-qg3",
+            crate::sdd::evidence::ValidationRequirementLevel::Full,
+        )
+        .await
+        .unwrap();
+
         let updated = update_spec_status(&pool, "SPEC-QG3", "done", "agent")
             .await
             .unwrap();

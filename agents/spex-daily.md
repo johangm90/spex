@@ -1,4 +1,5 @@
 ---
+name: spex-daily
 description: Daily project brief agent — generates a concise status report of the project for session kickoff or on-demand. Shows what was done, what's in progress, what's blocked, and what's next. Read-only, never modifies state.
 mode: subagent
 temperature: 0.1

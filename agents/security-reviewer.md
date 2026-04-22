@@ -1,4 +1,5 @@
 ---
+name: security-reviewer
 description: Security review specialist — inspects code and changes for security risks including auth, input handling, secret exposure, permissions, and unsafe defaults.
 mode: subagent
 temperature: 0.1

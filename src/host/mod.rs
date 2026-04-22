@@ -9,6 +9,8 @@ pub enum Host {
     Copilot,
     /// VS Code — uses a platform-specific `mcp.json` for global config; no per-agent files.
     VSCode,
+    /// Pi / pi-subagents — uses `~/.pi/agent/agents/` for user-scoped agent files.
+    Pi,
 }
 
 impl Host {
@@ -18,6 +20,7 @@ impl Host {
             "opencode" => Some(Host::OpenCode),
             "copilot" | "github-copilot" | "copilot-cli" => Some(Host::Copilot),
             "vscode" | "vs-code" | "code" => Some(Host::VSCode),
+            "pi" | "pi-subagents" => Some(Host::Pi),
             _ => None,
         }
     }
@@ -28,6 +31,7 @@ impl Host {
             Host::OpenCode => "opencode",
             Host::Copilot => "copilot",
             Host::VSCode => "vscode",
+            Host::Pi => "pi",
         }
     }
 }
@@ -43,12 +47,14 @@ pub struct HostProfile {
     /// `None` for hosts that do not use per-agent files.
     pub agent_extension: Option<&'static str>,
     /// Global MCP config file path.
-    pub mcp_config_path: PathBuf,
+    pub mcp_config_path: Option<PathBuf>,
     /// JSON key under which MCP servers are registered in the config file.
     pub mcp_servers_key: &'static str,
     /// Whether the MCP command should be a JSON array (`["spex","mcp","serve"]`)
     /// or a plain string (`"spex"`) with a separate `args` array.
     pub mcp_command_is_array: bool,
+    /// Whether this host supports spex MCP config installation.
+    pub supports_mcp: bool,
 }
 
 impl HostProfile {
@@ -60,17 +66,19 @@ impl HostProfile {
                 host: Host::OpenCode,
                 agents_dir: Some(home.join(".config").join("opencode").join("agents")),
                 agent_extension: Some("md"),
-                mcp_config_path: home.join(".config").join("opencode").join("config.json"),
+                mcp_config_path: Some(home.join(".config").join("opencode").join("config.json")),
                 mcp_servers_key: "mcp",
                 mcp_command_is_array: true,
+                supports_mcp: true,
             },
             Host::Copilot => HostProfile {
                 host: Host::Copilot,
                 agents_dir: Some(home.join(".copilot").join("agents")),
                 agent_extension: Some("agent.md"),
-                mcp_config_path: home.join(".copilot").join("mcp-config.json"),
+                mcp_config_path: Some(home.join(".copilot").join("mcp-config.json")),
                 mcp_servers_key: "mcpServers",
                 mcp_command_is_array: false,
+                supports_mcp: true,
             },
             Host::VSCode => {
                 let mcp_config_path = vscode_user_mcp_path(&home);
@@ -78,11 +86,21 @@ impl HostProfile {
                     host: Host::VSCode,
                     agents_dir: None,
                     agent_extension: None,
-                    mcp_config_path,
+                    mcp_config_path: Some(mcp_config_path),
                     mcp_servers_key: "servers",
                     mcp_command_is_array: false,
+                    supports_mcp: true,
                 }
             }
+            Host::Pi => HostProfile {
+                host: Host::Pi,
+                agents_dir: Some(home.join(".pi").join("agent").join("agents")),
+                agent_extension: Some("md"),
+                mcp_config_path: None,
+                mcp_servers_key: "",
+                mcp_command_is_array: false,
+                supports_mcp: false,
+            },
         })
     }
 }
@@ -137,6 +155,10 @@ pub fn detect_installed_hosts() -> Vec<Host> {
         found.push(Host::Copilot);
     }
 
+    if home.join(".pi").join("agent").exists() {
+        found.push(Host::Pi);
+    }
+
     // VS Code: check for the user data directory
     let vscode_exists = {
         #[cfg(target_os = "macos")]
@@ -178,6 +200,8 @@ mod tests {
         assert_eq!(Host::from_str("vscode"), Some(Host::VSCode));
         assert_eq!(Host::from_str("vs-code"), Some(Host::VSCode));
         assert_eq!(Host::from_str("code"), Some(Host::VSCode));
+        assert_eq!(Host::from_str("pi"), Some(Host::Pi));
+        assert_eq!(Host::from_str("pi-subagents"), Some(Host::Pi));
         assert_eq!(Host::from_str("unknown"), None);
     }
 
@@ -193,10 +217,11 @@ mod tests {
         assert_eq!(profile.agent_extension, Some("md"));
         assert_eq!(
             profile.mcp_config_path,
-            home.join(".config").join("opencode").join("config.json")
+            Some(home.join(".config").join("opencode").join("config.json"))
         );
         assert_eq!(profile.mcp_servers_key, "mcp");
         assert!(profile.mcp_command_is_array);
+        assert!(profile.supports_mcp);
     }
 
     #[test]
@@ -211,10 +236,11 @@ mod tests {
         assert_eq!(profile.agent_extension, Some("agent.md"));
         assert_eq!(
             profile.mcp_config_path,
-            home.join(".copilot").join("mcp-config.json")
+            Some(home.join(".copilot").join("mcp-config.json"))
         );
         assert_eq!(profile.mcp_servers_key, "mcpServers");
         assert!(!profile.mcp_command_is_array);
+        assert!(profile.supports_mcp);
     }
 
     #[test]
@@ -224,5 +250,20 @@ mod tests {
         assert!(profile.agent_extension.is_none());
         assert_eq!(profile.mcp_servers_key, "servers");
         assert!(!profile.mcp_command_is_array);
+        assert!(profile.supports_mcp);
+    }
+
+    #[test]
+    fn host_profile_pi_uses_correct_paths() {
+        let profile = HostProfile::for_host(Host::Pi).expect("home dir must exist");
+        let home = dirs::home_dir().unwrap();
+
+        assert_eq!(
+            profile.agents_dir,
+            Some(home.join(".pi").join("agent").join("agents"))
+        );
+        assert_eq!(profile.agent_extension, Some("md"));
+        assert!(profile.mcp_config_path.is_none());
+        assert!(!profile.supports_mcp);
     }
 }

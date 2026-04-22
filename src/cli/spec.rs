@@ -2,6 +2,7 @@ use anyhow::Result;
 use colored::Colorize;
 use sqlx::SqlitePool;
 
+use crate::config::load_config;
 use crate::sdd::{
     spec::{create_spec, get_spec, list_specs},
     task::list_tasks,
@@ -27,7 +28,8 @@ pub async fn cmd_spec_add(pool: &SqlitePool, id: &str, title: &str, priority: &s
 }
 
 pub async fn cmd_spec_approve(pool: &SqlitePool, id: &str) -> Result<()> {
-    let spec = approve_spec(pool, id, "human").await?;
+    let config = load_config()?;
+    let spec = approve_spec(pool, id, "human", Some(&config)).await?;
     println!("{} Spec {} approved.", "✓".green().bold(), spec.id.cyan());
     Ok(())
 }
@@ -44,14 +46,69 @@ pub async fn cmd_spec_start(pool: &SqlitePool, id: &str) -> Result<()> {
 }
 
 pub async fn cmd_spec_done(pool: &SqlitePool, id: &str) -> Result<()> {
-    let spec = complete_spec(pool, id, "human").await?;
-    println!(
-        "{} Spec {} is {}!",
-        "✓".green().bold(),
-        spec.id.cyan(),
-        colorize_status("done")
-    );
+    let config = load_config()?;
+    match complete_spec(pool, id, "human", Some(&config)).await {
+        Ok(spec) => {
+            println!(
+                "{} Spec {} is {}!",
+                "✓".green().bold(),
+                spec.id.cyan(),
+                colorize_status("done")
+            );
+        }
+        Err(err) => {
+            let msg = err.to_string();
+            eprintln!("{} Cannot complete spec {}", "✗".red().bold(), id.cyan());
+            eprintln!("  {}", msg.yellow());
+            print_spec_gate_hints(id, &msg);
+            std::process::exit(1);
+        }
+    }
     Ok(())
+}
+
+fn print_spec_gate_hints(spec_id: &str, error_msg: &str) {
+    if error_msg.contains("task(s) are still open") || error_msg.contains("open tasks") {
+        eprintln!(
+            "  {} Complete open tasks first: spex task list --spec {}",
+            "→".blue(),
+            spec_id
+        );
+    }
+    if error_msg.contains("ac_passed") || error_msg.contains("acceptance criteria") {
+        eprintln!(
+            "  {} Update AC counts: spex spec show {}",
+            "→".blue(),
+            spec_id
+        );
+    }
+    if error_msg.contains("missing evidence bundle")
+        || error_msg.contains("missing completion summary")
+        || error_msg.contains("missing successful")
+        || error_msg.contains("evidence bundle")
+        || error_msg.contains("artifact links")
+    {
+        eprintln!(
+            "  {} Submit evidence:  spex policy evidence submit <bundle-id> --spec {} --summary \"...\"",
+            "→".blue(),
+            spec_id
+        );
+    }
+    if error_msg.contains("requires approval")
+        || error_msg.contains("waiting on approval")
+        || error_msg.contains("approval")
+    {
+        eprintln!(
+            "  {} Request approval: spex policy approval request {} --reason \"...\"",
+            "→".blue(),
+            spec_id
+        );
+        eprintln!(
+            "  {} List approvals:   spex policy approval list --entity-id {}",
+            "→".blue(),
+            spec_id
+        );
+    }
 }
 
 pub async fn cmd_spec_list(

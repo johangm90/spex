@@ -1,4 +1,5 @@
 ---
+name: test-writer
 description: Test specialist — adds or adjusts focused tests for changed behavior, bug fixes, and regressions while preserving the repository's testing conventions.
 mode: subagent
 temperature: 0.1

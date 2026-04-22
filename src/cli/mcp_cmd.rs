@@ -16,13 +16,27 @@ pub async fn cmd_mcp_serve(pool: SqlitePool) -> Result<()> {
 pub fn cmd_mcp_setup(global: bool, host: Option<&str>) -> Result<()> {
     let resolved_host = resolve_host(host)?;
 
+    if let Some(profile) = &resolved_host {
+        if !profile.supports_mcp {
+            return Err(anyhow!(
+                "Host '{}' does not support MCP config setup. Use `spex skill install --all --host {}` or `spex setup --host {}` for agents-only setup.",
+                profile.host.name(),
+                profile.host.name(),
+                profile.host.name()
+            ));
+        }
+    }
+
     let path = if global {
         match &resolved_host {
             Some(profile) => {
-                if let Some(parent) = profile.mcp_config_path.parent() {
+                let config_path = profile.mcp_config_path.as_ref().ok_or_else(|| {
+                    anyhow!("Host '{}' has no MCP config path", profile.host.name())
+                })?;
+                if let Some(parent) = config_path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
-                profile.mcp_config_path.clone()
+                config_path.clone()
             }
             None => {
                 // Default to OpenCode global config when no host specified
@@ -85,7 +99,7 @@ fn resolve_host(host: Option<&str>) -> Result<Option<HostProfile>> {
         Some(s) => {
             let h = Host::from_str(s).ok_or_else(|| {
                 anyhow!(
-                    "Unknown host '{}'. Valid values: opencode, copilot, vscode",
+                    "Unknown host '{}'. Valid values: opencode, copilot, vscode, pi",
                     s
                 )
             })?;
@@ -222,6 +236,15 @@ mod tests {
     }
 
     #[test]
+    fn resolve_host_returns_profile_for_pi() {
+        let result = resolve_host(Some("pi")).unwrap();
+        assert!(result.is_some());
+        let profile = result.unwrap();
+        assert_eq!(profile.host.name(), "pi");
+        assert!(!profile.supports_mcp);
+    }
+
+    #[test]
     fn merge_mcp_entries_vscode_format_uses_servers_key() {
         let config = json!({});
         let (result, changed) = merge_mcp_entries(config, "servers", false);
@@ -236,5 +259,13 @@ mod tests {
             entry["args"].is_array(),
             "VSCode format must have args array"
         );
+    }
+
+    #[test]
+    fn cmd_mcp_setup_errors_for_pi_host() {
+        let err = cmd_mcp_setup(true, Some("pi")).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("does not support MCP config setup"));
     }
 }

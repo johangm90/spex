@@ -1,4 +1,5 @@
 ---
+name: spec-writer
 description: SDD spec writer — given a spec ID and requirements, drafts a complete spec/slice document with title, overview, acceptance criteria, dependencies, and open questions. Invoked by spex-architect.
 mode: subagent
 temperature: 0.3

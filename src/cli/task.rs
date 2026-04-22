@@ -2,6 +2,7 @@ use anyhow::Result;
 use colored::Colorize;
 use sqlx::SqlitePool;
 
+use crate::config::load_config;
 use crate::sdd::{
     task::{create_task, list_tasks},
     workflow::{complete_task, fail_task, start_task},
@@ -38,21 +39,61 @@ pub async fn cmd_task_add(
     Ok(())
 }
 
-pub async fn cmd_task_start(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = start_task(pool, id).await?;
+pub async fn cmd_task_start(pool: &SqlitePool, id: &str, updated_by: &str) -> Result<()> {
+    let task = start_task(pool, id, updated_by).await?;
     println!("{} Task {} started.", "✓".green(), task.id.cyan());
     Ok(())
 }
 
-pub async fn cmd_task_done(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = complete_task(pool, id).await?;
-    println!(
-        "{} Task {} marked {}.",
-        "✓".green().bold(),
-        task.id.cyan(),
-        colorize_status("done")
-    );
+pub async fn cmd_task_done(pool: &SqlitePool, id: &str, updated_by: &str) -> Result<()> {
+    let config = load_config()?;
+    match complete_task(pool, id, updated_by, Some(&config)).await {
+        Ok(task) => {
+            println!(
+                "{} Task {} marked {}.",
+                "✓".green().bold(),
+                task.id.cyan(),
+                colorize_status("done")
+            );
+        }
+        Err(err) => {
+            let msg = err.to_string();
+            eprintln!("{} Cannot complete task {}", "✗".red().bold(), id.cyan());
+            eprintln!("  {}", msg.yellow());
+            print_task_gate_hints(id, &msg);
+            std::process::exit(1);
+        }
+    }
     Ok(())
+}
+
+fn print_task_gate_hints(task_id: &str, error_msg: &str) {
+    if error_msg.contains("missing evidence bundle")
+        || error_msg.contains("missing completion summary")
+        || error_msg.contains("missing successful")
+        || error_msg.contains("evidence bundle")
+    {
+        eprintln!(
+            "  {} Submit evidence:  spex policy evidence submit <bundle-id> --spec <spec-id> --task {} --summary \"...\"",
+            "→".blue(),
+            task_id
+        );
+    }
+    if error_msg.contains("requires approval")
+        || error_msg.contains("waiting on approval")
+        || error_msg.contains("approval")
+    {
+        eprintln!(
+            "  {} Request approval: spex policy approval request {} --reason \"...\"",
+            "→".blue(),
+            task_id
+        );
+        eprintln!(
+            "  {} List approvals:   spex policy approval list --entity-id {}",
+            "→".blue(),
+            task_id
+        );
+    }
 }
 
 pub async fn cmd_task_fail(pool: &SqlitePool, id: &str) -> Result<()> {

@@ -1,4 +1,5 @@
 ---
+name: release-helper
 description: Release workflow specialist — prepares shipping context, validates release readiness, and helps with changelogs, PR summaries, and release notes.
 mode: subagent
 temperature: 0.1
