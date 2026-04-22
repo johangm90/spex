@@ -230,6 +230,37 @@ memory_set(
 )
 ```
 
+## MCP-unavailable fallback (no MCP tools / blocked environments)
+
+When spex MCP tools are not available (e.g. Pi, enterprise-blocked environments, or any host without MCP support), use the `spex` binary directly via `bash`. All memory operations are fully supported through the CLI.
+
+### Read memory
+```bash
+spex memory show <agent> <key> --json          # single entry, value parsed as JSON
+spex memory list --agent <agent> --json        # all entries for an agent
+spex memory search "<query>" --agent <agent> --json
+```
+
+### Write memory
+```bash
+spex memory set --agent <agent> --key <key> --value '<json_or_string>' --type <type>
+# Example — save session context:
+spex memory set \
+  --agent spex-architect \
+  --key session_context \
+  --type config \
+  --value '{"date":"2026-04-21","next_action":"..."}'
+```
+
+### Read specs and tasks
+```bash
+spex spec list --json
+spex task list --json
+spex brief --json
+```
+
+Use `--json` on every read so you can parse the output reliably. The `value` field in memory responses is always a parsed JSON value (not a double-encoded string).
+
 ## Rules
 - Inspect before deciding.
 - Prefer direct execution for small, local, low-risk work.
@@ -240,6 +271,7 @@ memory_set(
 - In monorepos, keep `session_context.active_subpath` current when work stays scoped to one subproject.
 - Keep the developer informed, but do not overwhelm them.
 - Match the developer's language.
+- When MCP tools are unavailable, fall back to the `spex` CLI via `bash` — all memory and state operations are supported.
 
 ## Communication style
 - Be concise and action-oriented.

@@ -3,6 +3,8 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+use crate::sdd::workflow::apply_legacy_task_status_update;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TaskStatus {
     Pending,
@@ -121,48 +123,8 @@ pub async fn list_tasks(
     Ok(tasks)
 }
 
-fn validate_task_transition(from: &str, to: &str) -> Result<()> {
-    let valid = matches!(
-        (from, to),
-        ("pending", "in_progress")
-            | ("in_progress", "done")
-            | ("in_progress", "failed")
-            | ("failed", "pending")
-    );
-    if !valid {
-        return Err(anyhow!("Invalid task transition: {} -> {}", from, to));
-    }
-    Ok(())
-}
-
 pub async fn update_task_status(pool: &SqlitePool, id: &str, new_status: &str) -> Result<Task> {
-    let task = get_task(pool, id)
-        .await?
-        .ok_or_else(|| anyhow!("Task '{}' not found", id))?;
-
-    validate_task_transition(&task.status, new_status)?;
-
-    let now = Utc::now().to_rfc3339();
-    let result =
-        sqlx::query("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ? AND status = ?")
-            .bind(new_status)
-            .bind(&now)
-            .bind(id)
-            .bind(&task.status)
-            .execute(pool)
-            .await?;
-
-    if result.rows_affected() == 0 {
-        return Err(anyhow!(
-            "Task '{}' status changed concurrently (expected '{}', no longer matches)",
-            id,
-            task.status
-        ));
-    }
-
-    get_task(pool, id)
-        .await?
-        .ok_or_else(|| anyhow!("Task '{}' not found after update", id))
+    apply_legacy_task_status_update(pool, id, new_status).await
 }
 
 pub async fn update_task_output_artifact(
@@ -188,6 +150,7 @@ mod tests {
     use super::*;
     use crate::sdd::spec::create_spec;
     use crate::sdd::test_helpers::make_pool;
+    use crate::sdd::workflow::validate_task_transition;
 
     // Helper: create a spec and a task in one call.
     async fn setup_task(pool: &SqlitePool, task_id: &str) -> Task {

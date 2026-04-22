@@ -14,7 +14,10 @@ use cli::{
     brief::cmd_brief,
     doctor::cmd_doctor,
     mcp_cmd::{cmd_mcp_serve, cmd_mcp_setup},
-    memory_cmd::{cmd_memory_gc, cmd_memory_list, cmd_memory_search, cmd_memory_show},
+    memory_cmd::{
+        cmd_memory_gc, cmd_memory_list, cmd_memory_search, cmd_memory_set, cmd_memory_show,
+        MemorySetOpts,
+    },
     plan::{cmd_plan_build, cmd_plan_show},
     pulse::cmd_pulse,
     skill_cmd::{cmd_setup, cmd_skill_install, cmd_skill_list},
@@ -270,6 +273,9 @@ pub enum MemoryCmd {
         mem_type: Option<String>,
         #[arg(long, default_value = "100")]
         limit: Option<i64>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Show a single memory entry
     Show {
@@ -277,6 +283,9 @@ pub enum MemoryCmd {
         key: String,
         #[arg(long)]
         spec: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Full-text search across memory entries
     Search {
@@ -287,6 +296,36 @@ pub enum MemoryCmd {
         spec: Option<String>,
         #[arg(long, name = "type")]
         mem_type: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Set (create or update) a memory entry
+    Set {
+        /// Agent name
+        #[arg(long)]
+        agent: String,
+        /// Memory key
+        #[arg(long)]
+        key: String,
+        /// Value — raw JSON object/array or plain string
+        #[arg(long)]
+        value: String,
+        /// Scope to a spec ID
+        #[arg(long)]
+        spec: Option<String>,
+        /// Memory type (decision, architecture, bugfix, pattern, config, discovery, learning)
+        #[arg(long, name = "type")]
+        mem_type: Option<String>,
+        /// TTL in seconds
+        #[arg(long)]
+        ttl: Option<i64>,
+        /// Related memory keys as JSON array (e.g. '["agent/key"]')
+        #[arg(long)]
+        related_to: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Garbage-collect soft-deleted and expired entries
     Gc {
@@ -430,21 +469,65 @@ async fn main() -> Result<()> {
                     spec,
                     mem_type,
                     limit,
+                    json,
                 } => {
-                    cmd_memory_list(&pool, &agent, spec.as_deref(), mem_type.as_deref(), limit)
-                        .await?
+                    cmd_memory_list(
+                        &pool,
+                        &agent,
+                        spec.as_deref(),
+                        mem_type.as_deref(),
+                        limit,
+                        json,
+                    )
+                    .await?
                 }
-                MemoryCmd::Show { agent, key, spec } => {
-                    cmd_memory_show(&pool, &agent, &key, spec.as_deref()).await?
-                }
+                MemoryCmd::Show {
+                    agent,
+                    key,
+                    spec,
+                    json,
+                } => cmd_memory_show(&pool, &agent, &key, spec.as_deref(), json).await?,
                 MemoryCmd::Search {
                     query,
                     agent,
                     spec,
                     mem_type,
+                    json,
                 } => {
-                    cmd_memory_search(&pool, &query, &agent, spec.as_deref(), mem_type.as_deref())
-                        .await?
+                    cmd_memory_search(
+                        &pool,
+                        &query,
+                        &agent,
+                        spec.as_deref(),
+                        mem_type.as_deref(),
+                        json,
+                    )
+                    .await?
+                }
+                MemoryCmd::Set {
+                    agent,
+                    key,
+                    value,
+                    spec,
+                    mem_type,
+                    ttl,
+                    related_to,
+                    json,
+                } => {
+                    cmd_memory_set(
+                        &pool,
+                        &agent,
+                        &key,
+                        &value,
+                        MemorySetOpts {
+                            spec: spec.as_deref(),
+                            mem_type: mem_type.as_deref(),
+                            ttl,
+                            related_to: related_to.as_deref(),
+                            json,
+                        },
+                    )
+                    .await?
                 }
                 MemoryCmd::Gc { dry_run } => cmd_memory_gc(&pool, dry_run).await?,
             }

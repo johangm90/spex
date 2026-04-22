@@ -5,6 +5,7 @@ pub mod memory;
 pub mod project_profile;
 pub mod spec;
 pub mod task;
+pub mod workflow;
 
 #[cfg(test)]
 pub mod test_helpers;

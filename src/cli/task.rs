@@ -3,8 +3,8 @@ use colored::Colorize;
 use sqlx::SqlitePool;
 
 use crate::sdd::{
-    event::emit_event,
-    task::{create_task, list_tasks, update_task_status},
+    task::{create_task, list_tasks},
+    workflow::{complete_task, fail_task, start_task},
 };
 
 use super::util::colorize_status;
@@ -39,29 +39,13 @@ pub async fn cmd_task_add(
 }
 
 pub async fn cmd_task_start(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = update_task_status(pool, id, "in_progress").await?;
-    emit_event(
-        pool,
-        "TaskStarted",
-        Some(&task.spec),
-        Some(&task.agent),
-        &format!("{{\"task\": \"{}\"}}", id),
-    )
-    .await?;
+    let task = start_task(pool, id).await?;
     println!("{} Task {} started.", "✓".green(), task.id.cyan());
     Ok(())
 }
 
 pub async fn cmd_task_done(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = update_task_status(pool, id, "done").await?;
-    emit_event(
-        pool,
-        "TaskCompleted",
-        Some(&task.spec),
-        Some(&task.agent),
-        &format!("{{\"task\": \"{}\"}}", id),
-    )
-    .await?;
+    let task = complete_task(pool, id).await?;
     println!(
         "{} Task {} marked {}.",
         "✓".green().bold(),
@@ -72,15 +56,7 @@ pub async fn cmd_task_done(pool: &SqlitePool, id: &str) -> Result<()> {
 }
 
 pub async fn cmd_task_fail(pool: &SqlitePool, id: &str) -> Result<()> {
-    let task = update_task_status(pool, id, "failed").await?;
-    emit_event(
-        pool,
-        "TaskFailed",
-        Some(&task.spec),
-        Some(&task.agent),
-        &format!("{{\"task\": \"{}\"}}", id),
-    )
-    .await?;
+    let task = fail_task(pool, id).await?;
     println!(
         "{} Task {} marked {}.",
         "✗".red(),

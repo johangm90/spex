@@ -92,3 +92,9 @@ If invoked directly by the developer (not via @spex-architect), send the handoff
 - If the task scope is ambiguous, ask for clarification before writing code.
 - Prefer `validation_commands.fast|primary|full` from project context over guessed verification commands when no stricter skill guidance exists.
 - Store notable implementation decisions in memory: `memory_set` with type `decision` or `pattern`.
+- When MCP tools are unavailable, use the `spex` CLI via `bash`:
+  ```bash
+  spex memory show spex-architect project_skill --json
+  spex memory set --agent sdd-builder --key <key> --type decision --value '<json>'
+  spex task list --json
+  ```

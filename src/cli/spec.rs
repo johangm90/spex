@@ -3,9 +3,9 @@ use colored::Colorize;
 use sqlx::SqlitePool;
 
 use crate::sdd::{
-    event::emit_event,
-    spec::{create_spec, get_spec, list_specs, update_spec_status},
+    spec::{create_spec, get_spec, list_specs},
     task::list_tasks,
+    workflow::{approve_spec, complete_spec, start_spec},
 };
 
 use super::util::colorize_status;
@@ -27,15 +27,13 @@ pub async fn cmd_spec_add(pool: &SqlitePool, id: &str, title: &str, priority: &s
 }
 
 pub async fn cmd_spec_approve(pool: &SqlitePool, id: &str) -> Result<()> {
-    let spec = update_spec_status(pool, id, "approved", "human").await?;
-    emit_event(pool, "SpecApproved", Some(id), Some("human"), "{}").await?;
+    let spec = approve_spec(pool, id, "human").await?;
     println!("{} Spec {} approved.", "✓".green().bold(), spec.id.cyan());
     Ok(())
 }
 
 pub async fn cmd_spec_start(pool: &SqlitePool, id: &str) -> Result<()> {
-    let spec = update_spec_status(pool, id, "in_progress", "human").await?;
-    emit_event(pool, "SpecStarted", Some(id), Some("human"), "{}").await?;
+    let spec = start_spec(pool, id, "human").await?;
     println!(
         "{} Spec {} is now {}.",
         "✓".green(),
@@ -46,8 +44,7 @@ pub async fn cmd_spec_start(pool: &SqlitePool, id: &str) -> Result<()> {
 }
 
 pub async fn cmd_spec_done(pool: &SqlitePool, id: &str) -> Result<()> {
-    let spec = update_spec_status(pool, id, "done", "human").await?;
-    emit_event(pool, "SpecCompleted", Some(id), Some("human"), "{}").await?;
+    let spec = complete_spec(pool, id, "human").await?;
     println!(
         "{} Spec {} is {}!",
         "✓".green().bold(),

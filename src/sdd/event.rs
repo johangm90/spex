@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Event {
@@ -30,6 +30,27 @@ pub async fn emit_event(
     .bind(payload_json)
     .bind(&now)
     .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn emit_event_tx(
+    tx: &mut Transaction<'_, Sqlite>,
+    event_type: &str,
+    spec: Option<&str>,
+    agent: Option<&str>,
+    payload_json: &str,
+) -> Result<()> {
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO events (type, spec, agent, payload, timestamp) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(event_type)
+    .bind(spec)
+    .bind(agent)
+    .bind(payload_json)
+    .bind(&now)
+    .execute(&mut **tx)
     .await?;
     Ok(())
 }

@@ -3,6 +3,8 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
+use crate::sdd::workflow::{apply_legacy_spec_status_update, enforce_spec_ac_update_gate};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SpecStatus {
     Draft,
@@ -131,74 +133,13 @@ pub async fn list_specs(
     Ok(specs)
 }
 
-/// Validate state machine transition.
-fn validate_transition(from: &str, to: &str) -> Result<()> {
-    let valid = matches!(
-        (from, to),
-        ("draft", "approved")
-            | ("approved", "in_progress")
-            | ("in_progress", "done")
-            | ("in_progress", "paused")
-            | ("paused", "in_progress")
-    );
-    if !valid {
-        return Err(anyhow!("Invalid transition: {} -> {}", from, to));
-    }
-    Ok(())
-}
-
 pub async fn update_spec_status(
     pool: &SqlitePool,
     id: &str,
     new_status: &str,
     updated_by: &str,
 ) -> Result<Spec> {
-    let spec = get_spec(pool, id)
-        .await?
-        .ok_or_else(|| anyhow!("Spec '{}' not found", id))?;
-
-    validate_transition(&spec.status, new_status)?;
-
-    if new_status == "done" {
-        if spec.ac_total == 0 {
-            return Err(anyhow!(
-                "Cannot mark spec '{}' as done: ac_total is 0 (no acceptance criteria defined)",
-                id
-            ));
-        }
-        if spec.ac_passed != spec.ac_total {
-            return Err(anyhow!(
-                "Cannot mark spec '{}' as done: ac_passed ({}) != ac_total ({})",
-                id,
-                spec.ac_passed,
-                spec.ac_total
-            ));
-        }
-    }
-
-    let now = Utc::now().to_rfc3339();
-    let result = sqlx::query(
-        "UPDATE specs SET status = ?, updated_at = ?, updated_by = ? WHERE id = ? AND status = ?",
-    )
-    .bind(new_status)
-    .bind(&now)
-    .bind(updated_by)
-    .bind(id)
-    .bind(&spec.status)
-    .execute(pool)
-    .await?;
-
-    if result.rows_affected() == 0 {
-        return Err(anyhow!(
-            "Spec '{}' status changed concurrently (expected '{}', no longer matches)",
-            id,
-            spec.status
-        ));
-    }
-
-    get_spec(pool, id)
-        .await?
-        .ok_or_else(|| anyhow!("Spec '{}' not found after update", id))
+    apply_legacy_spec_status_update(pool, id, new_status, updated_by).await
 }
 
 pub async fn update_spec_ac(
@@ -207,6 +148,11 @@ pub async fn update_spec_ac(
     ac_total: i64,
     ac_passed: i64,
 ) -> Result<Spec> {
+    let spec = get_spec(pool, id)
+        .await?
+        .ok_or_else(|| anyhow!("Spec '{}' not found", id))?;
+    enforce_spec_ac_update_gate(pool, &spec.id, &spec.status, ac_total, ac_passed).await?;
+
     let now = Utc::now().to_rfc3339();
     sqlx::query("UPDATE specs SET ac_total = ?, ac_passed = ?, updated_at = ? WHERE id = ?")
         .bind(ac_total)
@@ -240,6 +186,7 @@ pub async fn update_spec_agents(pool: &SqlitePool, id: &str, agents: &[String]) 
 mod tests {
     use super::*;
     use crate::sdd::test_helpers::make_pool;
+    use crate::sdd::workflow::validate_spec_transition;
 
     #[tokio::test]
     async fn create_spec_returns_draft_with_correct_fields() {
@@ -548,5 +495,9 @@ mod tests {
             updated.status, "done",
             "must allow done when ac_passed == ac_total"
         );
+    }
+
+    fn validate_transition(from: &str, to: &str) -> Result<()> {
+        validate_spec_transition(from, to).map(|_| ())
     }
 }

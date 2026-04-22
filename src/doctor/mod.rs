@@ -1,3 +1,5 @@
+use anyhow::Result;
+use sqlx::SqlitePool;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -34,8 +36,8 @@ pub async fn run_checks() -> Vec<CheckResult> {
     // 6. Git repo detected
     results.push(check_git_repo());
 
-    // 7. No specs stuck in in_progress
-    results.push(check_stuck_specs().await);
+    // 7. Control-plane lifecycle and relationship invariants hold
+    results.push(check_control_plane_invariants().await);
 
     // 8. Bundled or installed agent prompts reference real tools and agents
     results.push(check_prompt_runtime_consistency());
@@ -292,43 +294,314 @@ fn check_git_repo() -> CheckResult {
     }
 }
 
-async fn check_stuck_specs() -> CheckResult {
+async fn check_control_plane_invariants() -> CheckResult {
     match crate::sdd::db::open_project_db().await {
         Err(_) => CheckResult {
-            name: "Stuck specs".to_string(),
+            name: "Control-plane invariants".to_string(),
             status: CheckStatus::Warn,
             message: "Cannot open project DB to check.".to_string(),
         },
-        Ok(pool) => match crate::sdd::spec::list_specs(&pool, None, None).await {
+        Ok(pool) => match evaluate_control_plane_invariants(&pool).await {
             Err(e) => CheckResult {
-                name: "Stuck specs".to_string(),
+                name: "Control-plane invariants".to_string(),
                 status: CheckStatus::Fail,
                 message: format!("Error: {}", e),
             },
-            Ok(specs) => {
-                let in_progress: Vec<_> =
-                    specs.iter().filter(|s| s.status == "in_progress").collect();
-                if in_progress.is_empty() {
-                    CheckResult {
-                        name: "Stuck specs".to_string(),
-                        status: CheckStatus::Pass,
-                        message: "No specs stuck in_progress.".to_string(),
-                    }
-                } else {
-                    let ids: Vec<&str> = in_progress.iter().map(|s| s.id.as_str()).collect();
-                    CheckResult {
-                        name: "Stuck specs".to_string(),
-                        status: CheckStatus::Warn,
-                        message: format!(
-                            "{} spec(s) in_progress: {}",
-                            in_progress.len(),
-                            ids.join(", ")
-                        ),
+            Ok(result) => result,
+        },
+    }
+}
+
+async fn evaluate_control_plane_invariants(pool: &SqlitePool) -> Result<CheckResult> {
+    let specs = crate::sdd::spec::list_specs(pool, None, None).await?;
+    let tasks = crate::sdd::task::list_tasks(pool, None, None, None).await?;
+    let events =
+        crate::sdd::event::query_events(pool, None, None, None, None, None, None, None).await?;
+
+    let spec_ids: BTreeSet<String> = specs.iter().map(|spec| spec.id.clone()).collect();
+    let specs_by_id: BTreeMap<String, crate::sdd::spec::Spec> = specs
+        .iter()
+        .cloned()
+        .map(|spec| (spec.id.clone(), spec))
+        .collect();
+    let tasks_by_id: BTreeMap<String, crate::sdd::task::Task> = tasks
+        .iter()
+        .cloned()
+        .map(|task| (task.id.clone(), task))
+        .collect();
+
+    let mut failures = Vec::new();
+    let mut warnings = Vec::new();
+
+    let mut unfinished_by_done_spec: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for task in &tasks {
+        if task.status != "done" {
+            if let Some(spec) = specs_by_id.get(&task.spec) {
+                if spec.status == "done" {
+                    unfinished_by_done_spec
+                        .entry(spec.id.clone())
+                        .or_default()
+                        .push(format!("{}({})", task.id, task.status));
+                }
+            }
+        }
+    }
+    if !unfinished_by_done_spec.is_empty() {
+        failures.push(format!(
+            "done specs with unfinished tasks: {}",
+            format_grouped_ids(&unfinished_by_done_spec)
+        ));
+    }
+
+    let mut missing_spec_dependencies: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for spec in &specs {
+        let depends_on: Vec<String> = serde_json::from_str(&spec.depends_on).unwrap_or_default();
+        let missing: Vec<String> = depends_on
+            .into_iter()
+            .filter(|dependency| !spec_ids.contains(dependency))
+            .collect();
+        if !missing.is_empty() {
+            missing_spec_dependencies.insert(spec.id.clone(), missing);
+        }
+    }
+    if !missing_spec_dependencies.is_empty() {
+        failures.push(format!(
+            "specs with missing depends_on references: {}",
+            format_grouped_ids(&missing_spec_dependencies)
+        ));
+    }
+
+    let mut missing_task_inputs: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for task in &tasks {
+        let inputs: Vec<String> = serde_json::from_str(&task.inputs).unwrap_or_default();
+        let missing: Vec<String> = inputs
+            .into_iter()
+            .filter(|input| !tasks_by_id.contains_key(input))
+            .collect();
+        if !missing.is_empty() {
+            missing_task_inputs.insert(task.id.clone(), missing);
+        }
+    }
+    if !missing_task_inputs.is_empty() {
+        failures.push(format!(
+            "tasks with missing input references: {}",
+            format_grouped_ids(&missing_task_inputs)
+        ));
+    }
+
+    let mut spec_started = BTreeSet::new();
+    let mut spec_completed = BTreeSet::new();
+    let mut task_started = BTreeSet::new();
+    let mut task_completed = BTreeSet::new();
+    let mut task_failed = BTreeSet::new();
+    let mut orphaned_spec_events = Vec::new();
+    let mut orphaned_task_events = Vec::new();
+    let mut malformed_task_events = Vec::new();
+    let mut task_event_spec_mismatches = Vec::new();
+
+    for event in &events {
+        match event.r#type.as_str() {
+            "SpecStarted" => {
+                if let Some(spec_id) = event.spec.as_deref() {
+                    if specs_by_id.contains_key(spec_id) {
+                        spec_started.insert(spec_id.to_string());
+                    } else {
+                        orphaned_spec_events
+                            .push(format!("#{}:{}({})", event.id, event.r#type, spec_id));
                     }
                 }
             }
-        },
+            "SpecCompleted" => {
+                if let Some(spec_id) = event.spec.as_deref() {
+                    if specs_by_id.contains_key(spec_id) {
+                        spec_completed.insert(spec_id.to_string());
+                    } else {
+                        orphaned_spec_events
+                            .push(format!("#{}:{}({})", event.id, event.r#type, spec_id));
+                    }
+                }
+            }
+            "TaskStarted" | "TaskCompleted" | "TaskFailed" => {
+                let task_id = extract_task_id_from_payload(&event.payload);
+                let Some(task_id) = task_id else {
+                    malformed_task_events.push(format!("#{}:{}", event.id, event.r#type));
+                    continue;
+                };
+
+                let Some(task) = tasks_by_id.get(&task_id) else {
+                    orphaned_task_events
+                        .push(format!("#{}:{}({})", event.id, event.r#type, task_id));
+                    continue;
+                };
+
+                if event.spec.as_deref() != Some(task.spec.as_str()) {
+                    task_event_spec_mismatches.push(format!(
+                        "#{}:{}({} -> event spec {:?}, task spec {})",
+                        event.id, event.r#type, task_id, event.spec, task.spec
+                    ));
+                }
+
+                match event.r#type.as_str() {
+                    "TaskStarted" => {
+                        task_started.insert(task_id);
+                    }
+                    "TaskCompleted" => {
+                        task_completed.insert(task_id);
+                    }
+                    "TaskFailed" => {
+                        task_failed.insert(task_id);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
     }
+
+    if !orphaned_spec_events.is_empty() {
+        failures.push(format!(
+            "orphaned spec lifecycle events: {}",
+            orphaned_spec_events.join(", ")
+        ));
+    }
+    if !orphaned_task_events.is_empty() {
+        failures.push(format!(
+            "orphaned task lifecycle events: {}",
+            orphaned_task_events.join(", ")
+        ));
+    }
+    if !malformed_task_events.is_empty() {
+        failures.push(format!(
+            "task lifecycle events missing payload.task: {}",
+            malformed_task_events.join(", ")
+        ));
+    }
+    if !task_event_spec_mismatches.is_empty() {
+        failures.push(format!(
+            "task lifecycle event spec mismatches: {}",
+            task_event_spec_mismatches.join(", ")
+        ));
+    }
+
+    let missing_started_specs: Vec<String> = specs
+        .iter()
+        .filter(|spec| matches!(spec.status.as_str(), "in_progress" | "done"))
+        .filter(|spec| !spec_started.contains(spec.id.as_str()))
+        .map(|spec| format!("{}({})", spec.id, spec.status))
+        .collect();
+    if !missing_started_specs.is_empty() {
+        failures.push(format!(
+            "specs missing SpecStarted events: {}",
+            missing_started_specs.join(", ")
+        ));
+    }
+
+    let missing_completed_specs: Vec<String> = specs
+        .iter()
+        .filter(|spec| spec.status == "done")
+        .filter(|spec| !spec_completed.contains(spec.id.as_str()))
+        .map(|spec| spec.id.clone())
+        .collect();
+    if !missing_completed_specs.is_empty() {
+        failures.push(format!(
+            "done specs missing SpecCompleted events: {}",
+            missing_completed_specs.join(", ")
+        ));
+    }
+
+    let missing_started_tasks: Vec<String> = tasks
+        .iter()
+        .filter(|task| matches!(task.status.as_str(), "in_progress" | "done" | "failed"))
+        .filter(|task| !task_started.contains(task.id.as_str()))
+        .map(|task| format!("{}({})", task.id, task.status))
+        .collect();
+    if !missing_started_tasks.is_empty() {
+        failures.push(format!(
+            "tasks missing TaskStarted events: {}",
+            missing_started_tasks.join(", ")
+        ));
+    }
+
+    let missing_completed_tasks: Vec<String> = tasks
+        .iter()
+        .filter(|task| task.status == "done")
+        .filter(|task| !task_completed.contains(task.id.as_str()))
+        .map(|task| task.id.clone())
+        .collect();
+    if !missing_completed_tasks.is_empty() {
+        failures.push(format!(
+            "done tasks missing TaskCompleted events: {}",
+            missing_completed_tasks.join(", ")
+        ));
+    }
+
+    let missing_failed_tasks: Vec<String> = tasks
+        .iter()
+        .filter(|task| task.status == "failed")
+        .filter(|task| !task_failed.contains(task.id.as_str()))
+        .map(|task| task.id.clone())
+        .collect();
+    if !missing_failed_tasks.is_empty() {
+        failures.push(format!(
+            "failed tasks missing TaskFailed events: {}",
+            missing_failed_tasks.join(", ")
+        ));
+    }
+
+    let in_progress_specs: Vec<String> = specs
+        .iter()
+        .filter(|spec| spec.status == "in_progress")
+        .map(|spec| spec.id.clone())
+        .collect();
+    if !in_progress_specs.is_empty() {
+        warnings.push(format!(
+            "specs still in_progress: {}",
+            in_progress_specs.join(", ")
+        ));
+    }
+
+    let (status, message) = if !failures.is_empty() {
+        let mut message = failures.join("; ");
+        if !warnings.is_empty() {
+            message.push_str("; ");
+            message.push_str(&warnings.join("; "));
+        }
+        (CheckStatus::Fail, message)
+    } else if !warnings.is_empty() {
+        (CheckStatus::Warn, warnings.join("; "))
+    } else {
+        (
+            CheckStatus::Pass,
+            format!(
+                "Validated {} specs, {} tasks, and {} events for lifecycle consistency.",
+                specs.len(),
+                tasks.len(),
+                events.len()
+            ),
+        )
+    };
+
+    Ok(CheckResult {
+        name: "Control-plane invariants".to_string(),
+        status,
+        message,
+    })
+}
+
+fn extract_task_id_from_payload(payload: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()?
+        .get("task")?
+        .as_str()
+        .map(ToOwned::to_owned)
+}
+
+fn format_grouped_ids(entries: &BTreeMap<String, Vec<String>>) -> String {
+    entries
+        .iter()
+        .map(|(parent, children)| format!("{}=[{}]", parent, children.join(", ")))
+        .collect::<Vec<_>>()
+        .join("; ")
 }
 
 fn check_prompt_runtime_consistency() -> CheckResult {
@@ -801,7 +1074,56 @@ pub async fn fix_issues() -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sdd::event::emit_event;
     use std::path::PathBuf;
+
+    async fn insert_consistent_completed_spec_fixture(pool: &SqlitePool) {
+        sqlx::query(
+            "INSERT INTO specs (id, title, status, priority, depends_on, agents, ac_total, ac_passed, created_at, updated_at, updated_by) VALUES (?, ?, 'done', 'P0', '[]', '[]', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'tester')",
+        )
+        .bind("SPEC-OK")
+        .bind("Healthy spec")
+        .execute(pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO tasks (id, spec, title, agent, status, inputs, output_artifact, created_at, updated_at) VALUES (?, ?, ?, ?, 'done', '[]', ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .bind("TASK-OK")
+        .bind("SPEC-OK")
+        .bind("Healthy task")
+        .bind("sdd-builder")
+        .bind("src/doctor/mod.rs")
+        .execute(pool)
+        .await
+        .unwrap();
+
+        emit_event(pool, "SpecStarted", Some("SPEC-OK"), Some("tester"), "{}")
+            .await
+            .unwrap();
+        emit_event(
+            pool,
+            "TaskStarted",
+            Some("SPEC-OK"),
+            Some("sdd-builder"),
+            r#"{"task":"TASK-OK"}"#,
+        )
+        .await
+        .unwrap();
+        emit_event(
+            pool,
+            "TaskCompleted",
+            Some("SPEC-OK"),
+            Some("sdd-builder"),
+            r#"{"task":"TASK-OK"}"#,
+        )
+        .await
+        .unwrap();
+        emit_event(pool, "SpecCompleted", Some("SPEC-OK"), Some("tester"), "{}")
+            .await
+            .unwrap();
+    }
 
     #[test]
     fn extracts_mcp_tool_references_from_prompt_content() {
@@ -903,5 +1225,116 @@ Ignore state_fake_tool and memory_missing_tool later.
             "bundled prompts reference unknown agents: {}",
             format_bad_refs(&bad_agents)
         );
+    }
+
+    #[tokio::test]
+    async fn control_plane_invariants_pass_for_consistent_completed_fixture() {
+        let pool = crate::sdd::test_helpers::make_pool().await;
+        insert_consistent_completed_spec_fixture(&pool).await;
+
+        let result = evaluate_control_plane_invariants(&pool).await.unwrap();
+
+        assert!(matches!(result.status, CheckStatus::Pass));
+        assert!(result
+            .message
+            .contains("Validated 1 specs, 1 tasks, and 4 events"));
+    }
+
+    #[tokio::test]
+    async fn control_plane_invariants_fail_for_done_spec_with_unfinished_task() {
+        let pool = crate::sdd::test_helpers::make_pool().await;
+        sqlx::query(
+            "INSERT INTO specs (id, title, status, priority, depends_on, agents, ac_total, ac_passed, created_at, updated_at, updated_by) VALUES ('SPEC-DRIFT', 'Drifted spec', 'done', 'P0', '[]', '[]', 1, 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'tester')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO tasks (id, spec, title, agent, status, inputs, output_artifact, created_at, updated_at) VALUES ('TASK-PENDING', 'SPEC-DRIFT', 'Pending task', 'sdd-builder', 'pending', '[]', NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        emit_event(
+            &pool,
+            "SpecStarted",
+            Some("SPEC-DRIFT"),
+            Some("tester"),
+            "{}",
+        )
+        .await
+        .unwrap();
+        emit_event(
+            &pool,
+            "SpecCompleted",
+            Some("SPEC-DRIFT"),
+            Some("tester"),
+            "{}",
+        )
+        .await
+        .unwrap();
+
+        let result = evaluate_control_plane_invariants(&pool).await.unwrap();
+
+        assert!(matches!(result.status, CheckStatus::Fail));
+        assert!(result.message.contains("done specs with unfinished tasks"));
+        assert!(result
+            .message
+            .contains("SPEC-DRIFT=[TASK-PENDING(pending)]"));
+    }
+
+    #[tokio::test]
+    async fn control_plane_invariants_fail_for_missing_events_and_orphaned_refs() {
+        let pool = crate::sdd::test_helpers::make_pool().await;
+        sqlx::query(
+            "INSERT INTO specs (id, title, status, priority, depends_on, agents, ac_total, ac_passed, created_at, updated_at, updated_by) VALUES ('SPEC-EVENT', 'Event drift', 'in_progress', 'P0', '[\"SPEC-MISSING\"]', '[]', 0, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 'tester')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO tasks (id, spec, title, agent, status, inputs, output_artifact, created_at, updated_at) VALUES ('TASK-EVENT', 'SPEC-EVENT', 'Event drift task', 'sdd-builder', 'done', '[\"TASK-GHOST\"]', NULL, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        emit_event(
+            &pool,
+            "TaskCompleted",
+            Some("SPEC-WRONG"),
+            Some("sdd-builder"),
+            r#"{"task":"TASK-EVENT"}"#,
+        )
+        .await
+        .unwrap();
+        emit_event(
+            &pool,
+            "TaskStarted",
+            Some("SPEC-EVENT"),
+            Some("sdd-builder"),
+            r#"{"task":"TASK-GHOST"}"#,
+        )
+        .await
+        .unwrap();
+
+        let result = evaluate_control_plane_invariants(&pool).await.unwrap();
+
+        assert!(matches!(result.status, CheckStatus::Fail));
+        assert!(result
+            .message
+            .contains("specs with missing depends_on references"));
+        assert!(result.message.contains("SPEC-EVENT=[SPEC-MISSING]"));
+        assert!(result
+            .message
+            .contains("tasks with missing input references"));
+        assert!(result.message.contains("TASK-EVENT=[TASK-GHOST]"));
+        assert!(result.message.contains("orphaned task lifecycle events"));
+        assert!(result.message.contains("TASK-GHOST"));
+        assert!(result
+            .message
+            .contains("task lifecycle event spec mismatches"));
+        assert!(result.message.contains("SPEC-WRONG"));
+        assert!(result.message.contains("specs missing SpecStarted events"));
+        assert!(result.message.contains("tasks missing TaskStarted events"));
     }
 }
