@@ -1,5 +1,6 @@
 pub mod brief;
 pub mod doctor;
+pub mod eval;
 pub mod mcp_cmd;
 pub mod memory_cmd;
 pub mod plan;

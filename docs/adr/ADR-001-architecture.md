@@ -74,7 +74,7 @@ The current schema comprises five working tables: `specs`, `tasks`, `events`, `m
 
 OpenCode's MCP client natively supports the stdio transport. Launching `spex mcp serve` as a child process avoids port-allocation conflicts, removes the need for TLS or authentication, and keeps the tool stateless between MCP sessions (state lives in SQLite, not in process memory).
 
-The MCP server dispatches a canonical tool set for snapshot, project-context bootstrap, spec, task, event, memory, artifact, and PRD access. The current source exposes 23 canonical tools split across `state_*` and `memory_*` names in `build_tools_list()`, and this document should treat that source as authoritative for tool counts and names.
+The MCP server dispatches a canonical tool set for snapshot, project-context bootstrap, spec, task, event, memory, artifact, policy, sessions, evals, and PRD access. The current source exposes 38 canonical tools split across `state_*` and `memory_*` names in `build_tools_list()`, and this document should treat that source as authoritative for tool counts and names.
 
 #### Consequences
 
@@ -101,7 +101,7 @@ The MCP server dispatches a canonical tool set for snapshot, project-context boo
 
 **`include_dir!` macro** (from the `include_dir` crate), evaluated at compile time.
 
-12 bundled agent markdown files from `agents/` are embedded directly into the `spex` binary. `build.rs` watches `agents/` for rebuilds, and the current installer writes bundled files to `~/.config/opencode/agents/` when the user runs `spex setup` or `spex skill install --all`.
+13 bundled agent markdown files from `agents/` are embedded directly into the `spex` binary. `build.rs` watches `agents/` for rebuilds, and the current installer writes bundled files to `~/.config/opencode/agents/` when the user runs `spex setup` or `spex skill install --all`.
 
 #### Consequences
 
@@ -208,7 +208,7 @@ Status values are stored in the `specs.status` column, and transitions are valid
 
 #### Decision Outcome
 
-The current implementation exposes 23 canonical MCP tools:
+The current implementation exposes 38 canonical MCP tools:
 
 - 14 `state_*` tools for snapshot, project bootstrap, spec, task, event, artifact, and PRD operations
 - 9 `memory_*` tools for memory storage, search, deletion, statistics, garbage collection, and relationship lookup
@@ -249,6 +249,7 @@ Additionally, MCP `memory` entries include an optional `spec` scope field. Scopi
   state.db          # SQLite database (project-local)
 ~/.config/opencode/
   agents/           # Installed bundled agent markdown files
+~/.agents/
   skills/<slug>/    # Generated custom project skills (`SKILL.md`)
 ```
 

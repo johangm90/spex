@@ -15,6 +15,10 @@ use clap_complete::{generate, Shell};
 use cli::{
     brief::cmd_brief,
     doctor::cmd_doctor,
+    eval::{
+        cmd_eval_compare, cmd_eval_create, cmd_eval_list, cmd_eval_show, EvalCompareOptions,
+        EvalCreateOptions, EvalListOptions,
+    },
     mcp_cmd::{cmd_mcp_serve, cmd_mcp_setup},
     memory_cmd::{
         cmd_memory_gc, cmd_memory_list, cmd_memory_search, cmd_memory_set, cmd_memory_show,
@@ -96,6 +100,12 @@ pub enum Commands {
     Policy {
         #[command(subcommand)]
         cmd: PolicyCmd,
+    },
+
+    /// Manage eval runs and scorecards
+    Eval {
+        #[command(subcommand)]
+        cmd: EvalCmd,
     },
 
     /// Show project status dashboard
@@ -279,6 +289,95 @@ pub enum PolicyCmd {
     Approval {
         #[command(subcommand)]
         cmd: PolicyApprovalCmd,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum EvalCmd {
+    /// Create a structured eval run
+    Create {
+        #[arg(long)]
+        id: Option<String>,
+        #[arg(long)]
+        evaluator: String,
+        #[arg(long, value_parser = ["spec", "task", "artifact", "scope"])]
+        target_kind: String,
+        #[arg(long)]
+        target_ref: String,
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        artifact_id: Option<String>,
+        #[arg(long)]
+        summary: Option<String>,
+        #[arg(long)]
+        rationale: Option<String>,
+        #[arg(long, value_parser = ["pass", "warn", "fail", "mixed", "unknown"])]
+        outcome: String,
+        #[arg(long)]
+        overall_score: Option<f64>,
+        #[arg(long, default_value = "cli", value_parser = ["recorded", "cli", "mcp"])]
+        source: String,
+        #[arg(long)]
+        metadata_json: Option<String>,
+        #[arg(long)]
+        dimensions_json: Option<String>,
+        #[arg(long)]
+        dimensions_file: Option<String>,
+        #[arg(long)]
+        links_json: Option<String>,
+        #[arg(long)]
+        links_file: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List eval runs with filters
+    List {
+        #[arg(long)]
+        spec: Option<String>,
+        #[arg(long)]
+        task: Option<String>,
+        #[arg(long)]
+        artifact_id: Option<String>,
+        #[arg(long)]
+        outcome: Option<String>,
+        #[arg(long)]
+        evaluator: Option<String>,
+        #[arg(long)]
+        target_kind: Option<String>,
+        #[arg(long)]
+        target_ref: Option<String>,
+        #[arg(long)]
+        source: Option<String>,
+        #[arg(long)]
+        created_after: Option<String>,
+        #[arg(long)]
+        created_before: Option<String>,
+        #[arg(long)]
+        limit: Option<i64>,
+        #[arg(long)]
+        offset: Option<i64>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a single eval run with scorecard detail
+    Show {
+        id: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Compare an eval run against an explicit or inferred baseline
+    Compare {
+        #[arg(long)]
+        baseline_id: Option<String>,
+        #[arg(long)]
+        current_id: String,
+        #[arg(long)]
+        latest_baseline: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -781,6 +880,110 @@ async fn main() -> Result<()> {
             }
         }
 
+        Commands::Eval { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                EvalCmd::Create {
+                    id,
+                    evaluator,
+                    target_kind,
+                    target_ref,
+                    spec,
+                    task,
+                    artifact_id,
+                    summary,
+                    rationale,
+                    outcome,
+                    overall_score,
+                    source,
+                    metadata_json,
+                    dimensions_json,
+                    dimensions_file,
+                    links_json,
+                    links_file,
+                    json,
+                } => {
+                    cmd_eval_create(
+                        &pool,
+                        EvalCreateOptions {
+                            id: id.as_deref(),
+                            evaluator: &evaluator,
+                            target_kind: &target_kind,
+                            target_ref: &target_ref,
+                            spec: spec.as_deref(),
+                            task: task.as_deref(),
+                            artifact_id: artifact_id.as_deref(),
+                            summary: summary.as_deref(),
+                            rationale: rationale.as_deref(),
+                            outcome: &outcome,
+                            overall_score,
+                            source: &source,
+                            metadata_json: metadata_json.as_deref(),
+                            dimensions_json: dimensions_json.as_deref(),
+                            dimensions_file: dimensions_file.as_deref(),
+                            links_json: links_json.as_deref(),
+                            links_file: links_file.as_deref(),
+                            json,
+                        },
+                    )
+                    .await?
+                }
+                EvalCmd::List {
+                    spec,
+                    task,
+                    artifact_id,
+                    outcome,
+                    evaluator,
+                    target_kind,
+                    target_ref,
+                    source,
+                    created_after,
+                    created_before,
+                    limit,
+                    offset,
+                    json,
+                } => {
+                    cmd_eval_list(
+                        &pool,
+                        EvalListOptions {
+                            spec: spec.as_deref(),
+                            task: task.as_deref(),
+                            artifact_id: artifact_id.as_deref(),
+                            outcome: outcome.as_deref(),
+                            evaluator: evaluator.as_deref(),
+                            target_kind: target_kind.as_deref(),
+                            target_ref: target_ref.as_deref(),
+                            source: source.as_deref(),
+                            created_after: created_after.as_deref(),
+                            created_before: created_before.as_deref(),
+                            limit,
+                            offset,
+                            json,
+                        },
+                    )
+                    .await?
+                }
+                EvalCmd::Show { id, json } => cmd_eval_show(&pool, &id, json).await?,
+                EvalCmd::Compare {
+                    baseline_id,
+                    current_id,
+                    latest_baseline,
+                    json,
+                } => {
+                    cmd_eval_compare(
+                        &pool,
+                        EvalCompareOptions {
+                            baseline_id: baseline_id.as_deref(),
+                            current_id: &current_id,
+                            latest_baseline,
+                            json,
+                        },
+                    )
+                    .await?
+                }
+            }
+        }
+
         Commands::Pulse { since, until } => {
             let pool = open_project_db().await?;
             cmd_pulse(&pool, since.as_deref(), until.as_deref()).await?;
@@ -1054,5 +1257,34 @@ mod tests {
             help.contains("RUN_ID[:fast|primary|full|custom]"),
             "policy evidence submit help must document validation attachment syntax"
         );
+    }
+
+    #[test]
+    fn eval_help_exposes_create_list_and_show() {
+        let help = render_subcommand_help(&["eval"]);
+
+        assert!(help.contains("create"), "eval help must list create");
+        assert!(help.contains("list"), "eval help must list list");
+        assert!(help.contains("show"), "eval help must list show");
+        assert!(help.contains("compare"), "eval help must list compare");
+    }
+
+    #[test]
+    fn eval_create_help_documents_json_inputs() {
+        let help = render_subcommand_help(&["eval", "create"]);
+
+        assert!(help.contains("--dimensions-json"));
+        assert!(help.contains("--dimensions-file"));
+        assert!(help.contains("--links-json"));
+        assert!(help.contains("--links-file"));
+    }
+
+    #[test]
+    fn eval_compare_help_documents_baseline_options() {
+        let help = render_subcommand_help(&["eval", "compare"]);
+
+        assert!(help.contains("--baseline-id"));
+        assert!(help.contains("--current-id"));
+        assert!(help.contains("--latest-baseline"));
     }
 }

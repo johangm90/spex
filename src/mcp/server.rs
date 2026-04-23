@@ -187,8 +187,11 @@ pub(crate) fn canonical_tool_names() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sdd::artifact::register_artifact;
     use crate::sdd::event::query_events;
     use crate::sdd::memory::{memory_get_full, memory_set};
+    use crate::sdd::spec::create_spec;
+    use crate::sdd::task::create_task;
     use crate::sdd::test_helpers::make_pool;
 
     #[tokio::test]
@@ -654,7 +657,124 @@ mod tests {
         let resp = handle_request(&pool, req).await.unwrap();
         let result = resp.unwrap().result.expect("expected result");
         let tools = result["tools"].as_array().expect("tools must be array");
-        assert_eq!(tools.len(), 33, "expected 33 tools, got {}", tools.len());
+        assert_eq!(tools.len(), 38, "expected 38 tools, got {}", tools.len());
+    }
+
+    #[tokio::test]
+    async fn state_eval_tools_round_trip_create_list_get_and_compare() {
+        let pool = make_pool().await;
+
+        create_spec(&pool, "SPEC-EVAL-MCP", "Eval MCP", "P1", &[])
+            .await
+            .unwrap();
+        create_task(
+            &pool,
+            "TASK-EVAL-MCP",
+            "SPEC-EVAL-MCP",
+            "Eval target",
+            "sdd-builder",
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        register_artifact(
+            &pool,
+            "ART-EVAL-MCP",
+            Some("SPEC-EVAL-MCP"),
+            Some("TASK-EVAL-MCP"),
+            "sdd-builder",
+            "source",
+            Some("src/lib.rs"),
+            Some("eval target artifact"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let baseline = dispatch_tool(
+            &pool,
+            "state_eval_create",
+            json!({
+                "id": "eval-mcp-baseline",
+                "evaluator": "reviewer",
+                "target_kind": "task",
+                "target_ref": "TASK-EVAL-MCP",
+                "outcome": "warn",
+                "overall_score": 0.40,
+                "source": "mcp",
+                "dimensions": [
+                    {"name": "validation", "status": "warn", "score": 0.40}
+                ],
+                "links": [
+                    {"kind": "artifact", "ref": "ART-EVAL-MCP"}
+                ]
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(baseline["run"]["id"], "eval-mcp-baseline");
+
+        let current = dispatch_tool(
+            &pool,
+            "state_eval_create",
+            json!({
+                "id": "eval-mcp-current",
+                "evaluator": "reviewer",
+                "target_kind": "task",
+                "target_ref": "TASK-EVAL-MCP",
+                "outcome": "pass",
+                "overall_score": 0.92,
+                "source": "mcp",
+                "metadata": {"judge": "local"},
+                "dimensions": [
+                    {"name": "validation_coverage", "status": "pass", "score": 0.92}
+                ]
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(current["run"]["id"], "eval-mcp-current");
+
+        let listed = dispatch_tool(
+            &pool,
+            "state_eval_list",
+            json!({"task": "TASK-EVAL-MCP", "limit": 10}),
+        )
+        .await
+        .unwrap();
+        let items = listed.as_array().unwrap();
+        assert_eq!(items.len(), 2);
+
+        let fetched = dispatch_tool(
+            &pool,
+            "state_eval_get",
+            json!({"id": "eval-mcp-current"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(fetched["run"]["target_ref"], "TASK-EVAL-MCP");
+
+        let comparison = dispatch_tool(
+            &pool,
+            "state_eval_compare",
+            json!({
+                "baseline_eval_id": "eval-mcp-baseline",
+                "current_eval_id": "eval-mcp-current"
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(comparison["overall_classification"], "improved");
+
+        let latest = dispatch_tool(
+            &pool,
+            "state_eval_latest_baseline",
+            json!({"current_eval_id": "eval-mcp-current"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(latest["baseline_eval_id"], "eval-mcp-baseline");
     }
 
     #[tokio::test]

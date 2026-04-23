@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -183,14 +181,6 @@ pub struct PolicyConfig {
 }
 
 impl PolicyConfig {
-    pub fn scope_key(&self) -> PolicyScopeKey {
-        PolicyScopeKey {
-            scope_kind: self.scope_kind,
-            scope_ref: self.scope_ref.clone(),
-            agent: self.agent.clone(),
-        }
-    }
-
     pub fn rules(&self) -> Result<Value> {
         Ok(serde_json::from_str(&self.rules_json)?)
     }
@@ -694,14 +684,6 @@ pub async fn update_policy_config(
     get_policy_config(pool, id)
         .await?
         .ok_or_else(|| anyhow!("Policy config '{}' not found", id))
-}
-
-pub async fn delete_policy_config(pool: &SqlitePool, id: &str) -> Result<bool> {
-    let result = sqlx::query("DELETE FROM policy_configs WHERE id = ?")
-        .bind(id)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() > 0)
 }
 
 pub async fn list_policy_configs(

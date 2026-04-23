@@ -11,7 +11,7 @@
 
 Spex is a **Spec-Driven Development (SDD) CLI** that gives a team of autonomous AI coding agents a shared, persistent, structured picture of what needs to be built, who is building it, and what the current state of the work is.
 
-The problem it solves: when multiple LLM-based agents collaborate on a software project, there is no authoritative shared state — each session starts blind, agents duplicate work, and the human developer loses traceability. Spex provides that shared brain: a single Rust binary that runs a local MCP server, persists project state in SQLite, bundles 12 agent definition files, and enforces a human-gated spec lifecycle.
+The problem it solves: when multiple LLM-based agents collaborate on a software project, there is no authoritative shared state — each session starts blind, agents duplicate work, and the human developer loses traceability. Spex provides that shared brain: a single Rust binary that runs a local MCP server, persists project state in SQLite, bundles 13 agent definition files, and enforces a human-gated spec lifecycle.
 
 **Who benefits:**
 - Developers using AI-assisted coding (primarily OpenCode users) who want structured, traceable, multi-agent workflows from the terminal.
@@ -25,7 +25,7 @@ The problem it solves: when multiple LLM-based agents collaborate on a software 
 
 2. **Human remains the gate** — Every spec must pass through human approval (`draft → approved`) before any agent executes work, and the CLI enforces the state machine transitions — no agent can skip stages.
 
-3. **One binary, works anywhere** — `spex` is a self-contained Rust binary: it embeds 12 bundled agent markdown files, bundles the MCP server, includes migrations, and installs via a single shell command. No Node.js, no Python, no Docker required.
+3. **One binary, works anywhere** — `spex` is a self-contained Rust binary: it embeds 13 bundled agent markdown files, bundles the MCP server, includes migrations, and installs via a single shell command. No Node.js, no Python, no Docker required.
 
 ---
 
@@ -65,7 +65,7 @@ A developer building or running multi-agent pipelines with one orchestrator and 
 | **Date/time** | `chrono` 0.4 with serde | RFC3339 timestamps throughout |
 | **Error handling** | `anyhow` + `thiserror` | Propagate up to CLI boundary; display user-friendly messages |
 | **Terminal UI** | `colored` + `inquire` | Color output; interactive prompts for `plan build` |
-| **Asset embedding** | `include_dir` | 12 bundled agent markdown files from `agents/` compiled into the binary |
+| **Asset embedding** | `include_dir` | 13 bundled agent markdown files from `agents/` compiled into the binary |
 | **Platform dirs** | `dirs` | Resolve `~/.config/opencode/` cross-platform |
 | **MCP transport** | JSON-RPC 2.0 over stdio | No HTTP server; OpenCode spawns `spex mcp serve` as subprocess |
 | **CI/CD** | GitHub Actions | `ci.yml` (test + build), `release.yml` (cross-compile + publish) |
@@ -112,10 +112,10 @@ A spec is **done** when all of the following are true:
 The central feature. `spec add`, `spec approve`, `spec start`, `spec done` with state machine enforcement. `plan build` for interactive task decomposition. `pulse` dashboard. `trace` event log.
 
 ### MCP State Server
-The agent-facing API. JSON-RPC 2.0 over stdio. 23 canonical tools covering specs, tasks, events, memory, artifacts, project-context bootstrap, and PRD reading/writing. Started via `spex mcp serve`.
+The agent-facing API. JSON-RPC 2.0 over stdio. 38 canonical tools covering specs, tasks, events, memory, artifacts, project-context bootstrap, policy, sessions, evals, and PRD reading/writing. Started via `spex mcp serve`.
 
 ### Skills & Agent Bundle
-12 bundled agent markdown files embedded from `agents/` at compile time. Installed to `~/.config/opencode/agents/` via `spex setup` or `spex skill install --all`. Separately, custom project skills are generated as `SKILL.md` files under `~/.config/opencode/skills/<slug>/`.
+13 bundled agent markdown files embedded from `agents/` at compile time. Installed to `~/.config/opencode/agents/` via `spex setup` or `spex skill install --all`. Separately, custom project skills are generated as `SKILL.md` files under `~/.agents/skills/<slug>/`.
 
 Bundled execution-oriented agents should prefer `validation_commands.fast`, `primary`, and `full` from project context instead of guessing repository verification commands.
 
@@ -154,8 +154,8 @@ Per-agent, optional per-spec KV store. Current MCP tools include `memory_set`, `
 
 5. ~~**Test strategy** — IMP-003 (zero tests) is the highest-risk open item. Should tests live in `tests/integration/` (using `tempfile` for isolated DBs) or inline `#[cfg(test)]` modules? Integration or unit-first?~~ **Resolved:** Inline `#[cfg(test)]` modules with in-memory SQLite pools (`make_pool()`). Current source contains 97 Rust test functions across spec, task, event, artifact, memory, MCP dispatch, doctor, CLI, and GC coverage.
 
-6. ~~**Memory system evolution** — How deeply should the memory layer evolve toward Engram-style features (FTS5, typed observations, topic keys)? Is this a minor enhancement or a separate slice?~~ **Resolved:** Memory Evolution pass shipped: `memory_list` with filtering/pagination, `memory_gc` with FTS rebuild, `spex memory` CLI, QueryBuilder refactor. Current MCP surface: 23 canonical tools.
+6. ~~**Memory system evolution** — How deeply should the memory layer evolve toward Engram-style features (FTS5, typed observations, topic keys)? Is this a minor enhancement or a separate slice?~~ **Resolved:** Memory Evolution pass shipped: `memory_list` with filtering/pagination, `memory_gc` with FTS rebuild, `spex memory` CLI, QueryBuilder refactor. Current MCP surface: 38 canonical tools.
 
-7. ~~**MCP tool alias cleanup** — IMP-008: 27 tool registrations for 14 operations. Should aliases be hidden behind a `--legacy` flag, or kept first-class forever for backward compatibility?~~ **Resolved:** Current `build_tools_list()` exposes 23 canonical tools and the earlier "27 registrations" claim is stale.
+7. ~~**MCP tool alias cleanup** — IMP-008: 27 tool registrations for 14 operations. Should aliases be hidden behind a `--legacy` flag, or kept first-class forever for backward compatibility?~~ **Resolved:** Current `build_tools_list()` exposes 38 canonical tools and the earlier "27 registrations" claim is stale.
 
 8. ~~**Pagination** — IMP-009: `spec list`, `task list`, and `trace` have no limit. At what threshold does this become a real problem, and what pagination style fits a stdio MCP API?~~ **Resolved:** `list_specs`, `list_tasks`, and `query_events` all accept `limit`/`offset` pagination. MCP tools `state_slice_get`, `state_task_get`, and `state_event_query` expose these params.

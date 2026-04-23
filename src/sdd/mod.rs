@@ -1,5 +1,6 @@
 pub mod artifact;
 pub mod db;
+pub mod evals;
 pub mod event;
 pub mod evidence;
 pub mod memory;

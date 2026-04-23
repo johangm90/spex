@@ -1,5 +1,6 @@
 mod args;
 mod artifacts;
+mod evals;
 mod lifecycle;
 mod memory;
 mod policy;
@@ -26,6 +27,11 @@ pub(crate) async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) ->
         "memory_get" => memory::handle_get(pool, args).await,
         "state_artifact_register" => artifacts::handle_register(pool, args).await,
         "state_artifact_query" => artifacts::handle_query(pool, args).await,
+        "state_eval_create"
+        | "state_eval_list"
+        | "state_eval_get"
+        | "state_eval_compare"
+        | "state_eval_latest_baseline" => evals::handle(pool, name, &args).await.unwrap(),
         "state_prd_get" => project::handle_prd_get(pool, args).await,
         "memory_search" => memory::handle_search(pool, args).await,
         "memory_delete" => memory::handle_delete(pool, args).await,
@@ -366,6 +372,7 @@ fn build_static_tools_list() -> Value {
 pub(crate) fn build_tools_list() -> Value {
     let mut base = build_static_tools_list();
     let arr = base.as_array_mut().expect("tools list must be array");
+    arr.extend(evals::tool_descriptors());
     arr.extend(policy::tool_descriptors());
     arr.extend(sessions::tool_descriptors());
     base

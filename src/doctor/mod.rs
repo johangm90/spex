@@ -471,8 +471,8 @@ async fn evaluate_control_plane_invariants(pool: &SqlitePool) -> Result<CheckRes
         ));
     }
     if !malformed_task_events.is_empty() {
-        failures.push(format!(
-            "task lifecycle events missing payload.task: {}",
+        warnings.push(format!(
+            "legacy task lifecycle events missing payload.task: {}",
             malformed_task_events.join(", ")
         ));
     }
@@ -589,10 +589,11 @@ async fn evaluate_control_plane_invariants(pool: &SqlitePool) -> Result<CheckRes
 }
 
 fn extract_task_id_from_payload(payload: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(payload)
-        .ok()?
-        .get("task")?
-        .as_str()
+    let value = serde_json::from_str::<serde_json::Value>(payload).ok()?;
+    value
+        .get("task")
+        .and_then(|v| v.as_str())
+        .or_else(|| value.get("task_id").and_then(|v| v.as_str()))
         .map(ToOwned::to_owned)
 }
 
@@ -766,10 +767,37 @@ fn extract_count_for_phrase(content: &str, needle: &str) -> Option<usize> {
         if !line.contains(needle) {
             continue;
         }
+        if let Some(value) = nearest_ascii_number_before_phrase(line, needle) {
+            return Some(value);
+        }
         if let Some(value) = first_ascii_number(line) {
             return Some(value);
         }
     }
+    None
+}
+
+fn nearest_ascii_number_before_phrase(line: &str, needle: &str) -> Option<usize> {
+    let needle_start = line.find(needle)?;
+    let prefix = &line[..needle_start];
+    let bytes = prefix.as_bytes();
+
+    let mut end = bytes.len();
+    while end > 0 {
+        let idx = end - 1;
+        if !bytes[idx].is_ascii_digit() {
+            end -= 1;
+            continue;
+        }
+
+        let mut start = idx;
+        while start > 0 && bytes[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+
+        return prefix[start..=idx].parse().ok();
+    }
+
     None
 }
 
@@ -1165,6 +1193,14 @@ Ignore state_fake_tool and memory_missing_tool later.
     }
 
     #[test]
+    fn extract_task_id_from_payload_supports_legacy_task_id_key() {
+        assert_eq!(
+            extract_task_id_from_payload(r#"{"task_id":"T034"}"#),
+            Some("T034".to_string())
+        );
+    }
+
+    #[test]
     fn extracts_first_ascii_number_from_line() {
         assert_eq!(
             first_ascii_number("12 bundled agent markdown files"),
@@ -1181,6 +1217,17 @@ Ignore state_fake_tool and memory_missing_tool later.
             Some(23)
         );
         assert_eq!(extract_count_for_phrase(content, "health checks"), None);
+    }
+
+    #[test]
+    fn extract_count_for_phrase_prefers_number_nearest_phrase() {
+        let content = "3. One binary embeds 13 bundled agent markdown files\nJSON-RPC 2.0 over stdio. 38 canonical tools are exposed\n";
+
+        assert_eq!(
+            extract_count_for_phrase(content, "bundled agent markdown files"),
+            Some(13)
+        );
+        assert_eq!(extract_count_for_phrase(content, "canonical tools"), Some(38));
     }
 
     #[test]

@@ -16,7 +16,7 @@
 
 - **Specs** are the unit of work — named feature slices with a human-gated lifecycle (`draft → approved → in_progress → done`).
 - **Agents** share state through an embedded **MCP (Model Context Protocol)** server backed by a local SQLite database at `.spex/state.db`.
-- **12 bundled AI agent files** install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs them to `~/.config/opencode/agents`. Separately, `skill-builder` scaffolds custom project skills for your team's stack under `~/.config/opencode/skills/<slug>/SKILL.md`.
+- **13 bundled AI agent files** install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs them to `~/.config/opencode/agents`. Separately, `skill-builder` scaffolds custom project skills for your team's stack under `~/.agents/skills/<slug>/SKILL.md`.
 
 ---
 
