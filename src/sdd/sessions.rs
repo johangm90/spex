@@ -181,6 +181,102 @@ pub async fn get_session(pool: &SqlitePool, id: &str) -> Result<Option<Session>>
     Ok(row.map(row_to_session))
 }
 
+/// Save a named checkpoint for the current session state.
+pub async fn save_session_checkpoint(
+    pool: &SqlitePool,
+    session_id: &str,
+    agent: &str,
+    spec_id: Option<&str>,
+    task_id: Option<&str>,
+    checkpoint_data: serde_json::Value,
+    label: Option<&str>,
+) -> Result<crate::sdd::readiness::SessionCheckpoint> {
+    // 1. Verify the session exists.
+    get_session(pool, session_id)
+        .await?
+        .ok_or_else(|| anyhow!("Session not found: {}", session_id))?;
+
+    // 2. Generate a unique checkpoint ID.
+    let id = format!(
+        "ckpt-{}",
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+    );
+
+    // 3. Persist the checkpoint.
+    let checkpoint = crate::sdd::readiness::save_checkpoint(
+        pool,
+        &id,
+        session_id,
+        spec_id,
+        task_id,
+        agent,
+        &checkpoint_data.to_string(),
+        label,
+    )
+    .await?;
+
+    // 4. Emit domain event.
+    let payload = json!({
+        "session_id": session_id,
+        "checkpoint_id": id,
+        "agent": agent,
+        "label": label.unwrap_or(""),
+    });
+    emit_event(
+        pool,
+        "SessionCheckpointSaved",
+        spec_id,
+        Some(agent),
+        &payload.to_string(),
+    )
+    .await?;
+
+    // 5. Return the checkpoint.
+    Ok(checkpoint)
+}
+
+/// Restore session context from a checkpoint (returns the checkpoint data for the caller to apply).
+pub async fn restore_session_checkpoint(
+    pool: &SqlitePool,
+    session_id: &str,
+    checkpoint_id: Option<&str>,
+) -> Result<crate::sdd::readiness::SessionCheckpoint> {
+    let checkpoint = if let Some(ckpt_id) = checkpoint_id {
+        // 1a. Query by ID and verify it belongs to this session.
+        crate::sdd::readiness::get_checkpoint_by_id(pool, ckpt_id, session_id)
+            .await?
+            .ok_or_else(|| {
+                anyhow!(
+                    "Checkpoint '{}' not found for session '{}'",
+                    ckpt_id,
+                    session_id
+                )
+            })?
+    } else {
+        // 1b. Fetch the latest checkpoint for this session.
+        crate::sdd::readiness::get_latest_checkpoint(pool, session_id)
+            .await?
+            .ok_or_else(|| anyhow!("No checkpoints found for session '{}'", session_id))?
+    };
+
+    // 3. Emit domain event.
+    let payload = json!({
+        "session_id": session_id,
+        "checkpoint_id": checkpoint.id,
+    });
+    emit_event(
+        pool,
+        "SessionCheckpointRestored",
+        checkpoint.spec_id.as_deref(),
+        Some(checkpoint.agent.as_str()),
+        &payload.to_string(),
+    )
+    .await?;
+
+    // 4. Return the checkpoint.
+    Ok(checkpoint)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::test_helpers::open_test_db;
@@ -243,5 +339,164 @@ mod tests {
 
         let active_after = list_sessions(&pool, None, None, true, 10).await.unwrap();
         assert_eq!(active_after.len(), 0);
+    }
+
+    // ------------------------------------------------------------------
+    // Checkpoint save / restore service tests
+    // ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_save_session_checkpoint_returns_correct_data() {
+        let pool = open_test_db().await;
+
+        start_session(
+            &pool,
+            NewSession {
+                id: "sess-ckpt-1",
+                agent: "sdd-builder",
+                spec_id: None,
+                task_id: None,
+                host: None,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let data = serde_json::json!({"step": "planning", "progress": 42});
+        let cp = save_session_checkpoint(
+            &pool,
+            "sess-ckpt-1",
+            "sdd-builder",
+            None,
+            None,
+            data.clone(),
+            Some("my-label"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(cp.session_id, "sess-ckpt-1");
+        assert_eq!(cp.agent, "sdd-builder");
+        assert_eq!(cp.label.as_deref(), Some("my-label"));
+        assert_eq!(cp.checkpoint_data, data.to_string());
+        assert!(cp.id.starts_with("ckpt-"));
+    }
+
+    #[tokio::test]
+    async fn test_restore_session_checkpoint_by_id() {
+        let pool = open_test_db().await;
+
+        start_session(
+            &pool,
+            NewSession {
+                id: "sess-ckpt-2",
+                agent: "sdd-builder",
+                spec_id: None,
+                task_id: None,
+                host: None,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let cp = save_session_checkpoint(
+            &pool,
+            "sess-ckpt-2",
+            "sdd-builder",
+            None,
+            None,
+            serde_json::json!({"x": 1}),
+            Some("first"),
+        )
+        .await
+        .unwrap();
+
+        let restored = restore_session_checkpoint(&pool, "sess-ckpt-2", Some(&cp.id))
+            .await
+            .unwrap();
+
+        assert_eq!(restored.id, cp.id);
+        assert_eq!(restored.session_id, "sess-ckpt-2");
+        assert_eq!(restored.label.as_deref(), Some("first"));
+    }
+
+    #[tokio::test]
+    async fn test_restore_session_checkpoint_latest() {
+        let pool = open_test_db().await;
+
+        start_session(
+            &pool,
+            NewSession {
+                id: "sess-ckpt-3",
+                agent: "sdd-builder",
+                spec_id: None,
+                task_id: None,
+                host: None,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        save_session_checkpoint(
+            &pool,
+            "sess-ckpt-3",
+            "sdd-builder",
+            None,
+            None,
+            serde_json::json!({"v": 1}),
+            Some("first"),
+        )
+        .await
+        .unwrap();
+
+        // Small sleep to ensure ordering by saved_at.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+
+        let second = save_session_checkpoint(
+            &pool,
+            "sess-ckpt-3",
+            "sdd-builder",
+            None,
+            None,
+            serde_json::json!({"v": 2}),
+            Some("second"),
+        )
+        .await
+        .unwrap();
+
+        // Restore with None should return the most recent checkpoint.
+        let restored = restore_session_checkpoint(&pool, "sess-ckpt-3", None)
+            .await
+            .unwrap();
+
+        assert_eq!(restored.id, second.id);
+        assert_eq!(restored.label.as_deref(), Some("second"));
+    }
+
+    #[tokio::test]
+    async fn test_restore_session_checkpoint_no_checkpoints_returns_error() {
+        let pool = open_test_db().await;
+
+        start_session(
+            &pool,
+            NewSession {
+                id: "sess-ckpt-4",
+                agent: "sdd-builder",
+                spec_id: None,
+                task_id: None,
+                host: None,
+                notes: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let result = restore_session_checkpoint(&pool, "sess-ckpt-4", None).await;
+        assert!(result.is_err(), "should error when no checkpoints exist");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("No checkpoints found"), "error message: {msg}");
     }
 }

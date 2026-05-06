@@ -657,7 +657,7 @@ mod tests {
         let resp = handle_request(&pool, req).await.unwrap();
         let result = resp.unwrap().result.expect("expected result");
         let tools = result["tools"].as_array().expect("tools must be array");
-        assert_eq!(tools.len(), 38, "expected 38 tools, got {}", tools.len());
+        assert_eq!(tools.len(), 48, "expected 48 tools, got {}", tools.len());
     }
 
     #[tokio::test]
@@ -746,13 +746,9 @@ mod tests {
         let items = listed.as_array().unwrap();
         assert_eq!(items.len(), 2);
 
-        let fetched = dispatch_tool(
-            &pool,
-            "state_eval_get",
-            json!({"id": "eval-mcp-current"}),
-        )
-        .await
-        .unwrap();
+        let fetched = dispatch_tool(&pool, "state_eval_get", json!({"id": "eval-mcp-current"}))
+            .await
+            .unwrap();
         assert_eq!(fetched["run"]["target_ref"], "TASK-EVAL-MCP");
 
         let comparison = dispatch_tool(

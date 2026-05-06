@@ -230,10 +230,17 @@ pub async fn cmd_eval_compare(pool: &SqlitePool, options: EvalCompareOptions<'_>
     }
 
     let comparison = match (options.baseline_id, options.latest_baseline) {
-        (Some(baseline_id), false) => compare_eval_runs(pool, baseline_id, options.current_id).await?,
+        (Some(baseline_id), false) => {
+            compare_eval_runs(pool, baseline_id, options.current_id).await?
+        }
         (None, true) => compare_eval_run_to_latest_baseline(pool, options.current_id)
             .await?
-            .ok_or_else(|| anyhow::anyhow!("no earlier baseline eval found for '{}'", options.current_id))?,
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "no earlier baseline eval found for '{}'",
+                    options.current_id
+                )
+            })?,
         (Some(_), true) => unreachable!("validated above"),
         (None, false) => bail!("pass either --baseline-id or --latest-baseline"),
     };
@@ -342,7 +349,10 @@ fn print_eval_comparison_human(comparison: &EvalRunComparison) {
             "    - {} | {} | baseline={} | current={} | Δ={}",
             dimension.dimension_name,
             dimension.classification,
-            format_status_with_score(dimension.baseline_status.as_deref(), dimension.baseline_score),
+            format_status_with_score(
+                dimension.baseline_status.as_deref(),
+                dimension.baseline_score
+            ),
             format_status_with_score(dimension.current_status.as_deref(), dimension.current_score),
             format_signed_score(dimension.score_delta)
         );

@@ -1227,7 +1227,10 @@ Ignore state_fake_tool and memory_missing_tool later.
             extract_count_for_phrase(content, "bundled agent markdown files"),
             Some(13)
         );
-        assert_eq!(extract_count_for_phrase(content, "canonical tools"), Some(38));
+        assert_eq!(
+            extract_count_for_phrase(content, "canonical tools"),
+            Some(38)
+        );
     }
 
     #[test]

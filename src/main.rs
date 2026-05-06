@@ -32,7 +32,15 @@ use cli::{
         cmd_policy_evidence_submit,
     },
     pulse::cmd_pulse,
-    session::{cmd_session_end, cmd_session_list, cmd_session_start},
+    readiness::{
+        cmd_readiness_add_requirement, cmd_readiness_approve, cmd_readiness_enter_review,
+        cmd_readiness_operator, cmd_readiness_phase, cmd_readiness_satisfy_requirement,
+        cmd_readiness_spec,
+    },
+    session::{
+        cmd_session_checkpoint, cmd_session_checkpoints, cmd_session_end, cmd_session_list,
+        cmd_session_restore, cmd_session_start,
+    },
     skill_cmd::{cmd_setup, cmd_skill_install, cmd_skill_list},
     spec::{
         cmd_spec_add, cmd_spec_approve, cmd_spec_done, cmd_spec_list, cmd_spec_show, cmd_spec_start,
@@ -186,6 +194,12 @@ pub enum Commands {
     Session {
         #[command(subcommand)]
         cmd: SessionCmd,
+    },
+
+    /// Manage workflow phases, review requirements, and readiness reports
+    Readiness {
+        #[command(subcommand)]
+        cmd: ReadinessCmd,
     },
 }
 
@@ -671,6 +685,100 @@ pub enum SessionCmd {
         #[arg(long)]
         active: bool,
     },
+    /// Save a checkpoint for a session
+    Checkpoint {
+        /// Session ID
+        session_id: String,
+        /// Agent identifier
+        #[arg(long)]
+        agent: String,
+        /// Scope to a spec ID
+        #[arg(long)]
+        spec: Option<String>,
+        /// Scope to a task ID
+        #[arg(long)]
+        task: Option<String>,
+        /// Human-readable label for this checkpoint
+        #[arg(long)]
+        label: Option<String>,
+        /// Checkpoint data as a JSON string
+        #[arg(long)]
+        data: String,
+    },
+    /// Restore a session checkpoint (latest if --checkpoint not given)
+    Restore {
+        /// Session ID
+        session_id: String,
+        /// Checkpoint ID to restore (defaults to latest)
+        #[arg(long)]
+        checkpoint: Option<String>,
+    },
+    /// List all checkpoints for a session
+    Checkpoints {
+        /// Session ID
+        session_id: String,
+    },
+}
+
+// ─── Readiness Subcommands ────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+pub enum ReadinessCmd {
+    /// Show readiness report for a single spec
+    Spec {
+        /// Spec ID
+        spec_id: String,
+    },
+    /// Show operator-level readiness across all specs
+    Operator,
+    /// Transition a spec to a new workflow phase
+    Phase {
+        /// Spec ID
+        spec_id: String,
+        /// Phase: planning | in_progress | review | done
+        phase: String,
+        /// Who is making the transition
+        #[arg(long)]
+        by: Option<String>,
+        /// Optional notes
+        #[arg(long)]
+        notes: Option<String>,
+    },
+    /// Enter review phase and seed default requirements
+    EnterReview {
+        /// Spec ID
+        spec_id: String,
+        /// Agent entering review
+        #[arg(long)]
+        by: Option<String>,
+    },
+    /// Approve review for a spec
+    Approve {
+        /// Spec ID
+        spec_id: String,
+        /// Approver identity
+        #[arg(long, required = true)]
+        by: String,
+    },
+    /// Add a review requirement to a spec
+    AddRequirement {
+        /// Spec ID
+        spec_id: String,
+        /// Requirement kind: test_pass | lint_pass | review_approved | custom
+        #[arg(long, required = true)]
+        kind: String,
+        /// Human-readable description
+        #[arg(long, required = true)]
+        description: String,
+    },
+    /// Satisfy a review requirement
+    Satisfy {
+        /// Requirement ID
+        req_id: String,
+        /// Who satisfied the requirement
+        #[arg(long, required = true)]
+        by: String,
+    },
 }
 
 // ─── Entry Point ──────────────────────────────────────────────────────────────
@@ -1144,6 +1252,63 @@ async fn main() -> Result<()> {
                     agent,
                     active,
                 } => cmd_session_list(&pool, spec.as_deref(), agent.as_deref(), active).await?,
+                SessionCmd::Checkpoint {
+                    session_id,
+                    agent,
+                    spec,
+                    task,
+                    label,
+                    data,
+                } => {
+                    cmd_session_checkpoint(
+                        &pool,
+                        &session_id,
+                        &agent,
+                        spec.as_deref(),
+                        task.as_deref(),
+                        label.as_deref(),
+                        &data,
+                    )
+                    .await?
+                }
+                SessionCmd::Restore {
+                    session_id,
+                    checkpoint,
+                } => cmd_session_restore(&pool, &session_id, checkpoint.as_deref()).await?,
+                SessionCmd::Checkpoints { session_id } => {
+                    cmd_session_checkpoints(&pool, &session_id).await?
+                }
+            }
+        }
+
+        Commands::Readiness { cmd } => {
+            let pool = open_project_db().await?;
+            match cmd {
+                ReadinessCmd::Spec { spec_id } => cmd_readiness_spec(&pool, &spec_id).await?,
+                ReadinessCmd::Operator => cmd_readiness_operator(&pool).await?,
+                ReadinessCmd::Phase {
+                    spec_id,
+                    phase,
+                    by,
+                    notes,
+                } => {
+                    cmd_readiness_phase(&pool, &spec_id, &phase, by.as_deref(), notes.as_deref())
+                        .await?
+                }
+                ReadinessCmd::EnterReview { spec_id, by } => {
+                    cmd_readiness_enter_review(&pool, &spec_id, by.as_deref()).await?
+                }
+                ReadinessCmd::Approve { spec_id, by } => {
+                    cmd_readiness_approve(&pool, &spec_id, &by).await?
+                }
+                ReadinessCmd::AddRequirement {
+                    spec_id,
+                    kind,
+                    description,
+                } => cmd_readiness_add_requirement(&pool, &spec_id, &kind, &description).await?,
+                ReadinessCmd::Satisfy { req_id, by } => {
+                    cmd_readiness_satisfy_requirement(&pool, &req_id, &by).await?
+                }
             }
         }
     }

@@ -6,6 +6,7 @@ pub mod evidence;
 pub mod memory;
 pub mod policy;
 pub mod project_profile;
+pub mod readiness;
 pub mod sessions;
 pub mod spec;
 pub mod task;

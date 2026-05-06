@@ -145,7 +145,11 @@ pub(super) fn tool_descriptors() -> Vec<Value> {
     ]
 }
 
-pub(super) async fn handle(pool: &SqlitePool, tool_name: &str, args: &Value) -> Option<Result<Value>> {
+pub(super) async fn handle(
+    pool: &SqlitePool,
+    tool_name: &str,
+    args: &Value,
+) -> Option<Result<Value>> {
     match tool_name {
         "state_eval_create" => Some(handle_create(pool, args).await),
         "state_eval_list" => Some(handle_list(pool, args).await),
@@ -216,24 +220,26 @@ async fn handle_create(pool: &SqlitePool, args: &Value) -> Result<Value> {
 }
 
 async fn handle_list(pool: &SqlitePool, args: &Value) -> Result<Value> {
-    Ok(json!(list_eval_run_details(
-        pool,
-        EvalRunFilters {
-            spec: optional_str(args, "spec"),
-            task: optional_str(args, "task"),
-            artifact_id: optional_str(args, "artifact_id"),
-            outcome: optional_str(args, "outcome"),
-            evaluator: optional_str(args, "evaluator"),
-            target_kind: optional_str(args, "target_kind"),
-            target_ref: optional_str(args, "target_ref"),
-            source: optional_str(args, "source"),
-            created_after: optional_str(args, "created_after"),
-            created_before: optional_str(args, "created_before"),
-            limit: optional_i64(args, "limit"),
-            offset: optional_i64(args, "offset"),
-        },
-    )
-    .await?))
+    Ok(json!(
+        list_eval_run_details(
+            pool,
+            EvalRunFilters {
+                spec: optional_str(args, "spec"),
+                task: optional_str(args, "task"),
+                artifact_id: optional_str(args, "artifact_id"),
+                outcome: optional_str(args, "outcome"),
+                evaluator: optional_str(args, "evaluator"),
+                target_kind: optional_str(args, "target_kind"),
+                target_ref: optional_str(args, "target_ref"),
+                source: optional_str(args, "source"),
+                created_after: optional_str(args, "created_after"),
+                created_before: optional_str(args, "created_before"),
+                limit: optional_i64(args, "limit"),
+                offset: optional_i64(args, "offset"),
+            },
+        )
+        .await?
+    ))
 }
 
 async fn handle_get(pool: &SqlitePool, args: &Value) -> Result<Value> {
@@ -245,12 +251,14 @@ async fn handle_get(pool: &SqlitePool, args: &Value) -> Result<Value> {
 }
 
 async fn handle_compare(pool: &SqlitePool, args: &Value) -> Result<Value> {
-    Ok(json!(compare_eval_runs(
-        pool,
-        required_str(args, "baseline_eval_id")?,
-        required_str(args, "current_eval_id")?,
-    )
-    .await?))
+    Ok(json!(
+        compare_eval_runs(
+            pool,
+            required_str(args, "baseline_eval_id")?,
+            required_str(args, "current_eval_id")?,
+        )
+        .await?
+    ))
 }
 
 async fn handle_latest_baseline(pool: &SqlitePool, args: &Value) -> Result<Value> {

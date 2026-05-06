@@ -6,6 +6,7 @@ pub mod memory_cmd;
 pub mod plan;
 pub mod policy;
 pub mod pulse;
+pub mod readiness;
 pub mod session;
 pub mod skill_cmd;
 pub mod spec;

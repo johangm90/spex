@@ -16,7 +16,11 @@ use tempfile::TempDir;
 
 use sdd::{
     artifact::register_artifact,
-    evals::{compare_eval_run_to_latest_baseline, compare_eval_runs, get_eval_run_details, list_eval_run_details, record_eval_run, EvalRunFilters, NewEvalRun, NewEvalRunLink, NewEvalScorecardDimension, RecordEvalRun},
+    evals::{
+        compare_eval_run_to_latest_baseline, compare_eval_runs, get_eval_run_details,
+        list_eval_run_details, record_eval_run, EvalRunFilters, NewEvalRun, NewEvalRunLink,
+        NewEvalScorecardDimension, RecordEvalRun,
+    },
     spec::create_spec,
     task::create_task,
     workflow::{approve_spec, start_spec, start_task},
@@ -370,12 +374,19 @@ async fn eval_domain_persistence_and_comparison_cover_append_only_and_filters() 
     )
     .await
     .unwrap_err();
-    assert!(duplicate_err.to_string().contains("UNIQUE") || duplicate_err.to_string().contains("unique"));
+    assert!(
+        duplicate_err.to_string().contains("UNIQUE")
+            || duplicate_err.to_string().contains("unique")
+    );
 
     let all_runs = list_eval_run_details(&pool, EvalRunFilters::default())
         .await
         .unwrap();
-    assert_eq!(all_runs.len(), 2, "failed writes must not partially persist");
+    assert_eq!(
+        all_runs.len(),
+        2,
+        "failed writes must not partially persist"
+    );
 }
 
 #[tokio::test]
@@ -385,7 +396,11 @@ async fn eval_cli_round_trip_and_no_eval_backward_compatibility() {
     pool.close().await;
 
     let empty_list = run_cli(root.path(), &["eval", "list"]);
-    assert!(empty_list.status.success(), "stderr: {}", stderr_text(&empty_list));
+    assert!(
+        empty_list.status.success(),
+        "stderr: {}",
+        stderr_text(&empty_list)
+    );
     assert!(stdout_text(&empty_list).contains("No evals found."));
 
     let create = run_cli(
@@ -438,7 +453,11 @@ async fn eval_cli_round_trip_and_no_eval_backward_compatibility() {
             "--json",
         ],
     );
-    assert!(create_current.status.success(), "stderr: {}", stderr_text(&create_current));
+    assert!(
+        create_current.status.success(),
+        "stderr: {}",
+        stderr_text(&create_current)
+    );
 
     let list = run_cli(
         root.path(),
@@ -448,10 +467,7 @@ async fn eval_cli_round_trip_and_no_eval_backward_compatibility() {
     let listed: Value = serde_json::from_str(&stdout_text(&list)).unwrap();
     assert_eq!(listed.as_array().unwrap().len(), 2);
 
-    let show = run_cli(
-        root.path(),
-        &["eval", "show", "eval-cli-current", "--json"],
-    );
+    let show = run_cli(root.path(), &["eval", "show", "eval-cli-current", "--json"]);
     assert!(show.status.success(), "stderr: {}", stderr_text(&show));
     let shown: Value = serde_json::from_str(&stdout_text(&show)).unwrap();
     assert_eq!(shown["run"]["id"], "eval-cli-current");
@@ -468,7 +484,11 @@ async fn eval_cli_round_trip_and_no_eval_backward_compatibility() {
             "--json",
         ],
     );
-    assert!(compare.status.success(), "stderr: {}", stderr_text(&compare));
+    assert!(
+        compare.status.success(),
+        "stderr: {}",
+        stderr_text(&compare)
+    );
     let compared: Value = serde_json::from_str(&stdout_text(&compare)).unwrap();
     assert_eq!(compared["overall_classification"], "improved");
 
@@ -576,7 +596,10 @@ async fn eval_mcp_round_trip_and_no_eval_backward_compatibility() {
 
     let missing = session.call_tool("state_eval_get", json!({"id": "missing-eval"}));
     assert!(missing.is_error);
-    assert!(missing.payload["error"].as_str().unwrap().contains("not found"));
+    assert!(missing.payload["error"]
+        .as_str()
+        .unwrap()
+        .contains("not found"));
 
     session.shutdown();
 }

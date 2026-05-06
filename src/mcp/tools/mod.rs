@@ -5,13 +5,14 @@ mod lifecycle;
 mod memory;
 mod policy;
 mod project;
+mod readiness;
 mod sessions;
 
 use anyhow::Result;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
 
-pub(crate) async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Value> {
+pub async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result<Value> {
     match name {
         "state_snapshot" => project::handle_snapshot(pool, args).await,
         "state_project_context" => project::handle_project_context(pool, args).await,
@@ -51,6 +52,16 @@ pub(crate) async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) ->
         "state_session_start" | "state_session_end" | "state_sessions_list" => {
             sessions::handle(pool, name, &args).await.unwrap()
         }
+        "state_readiness_spec"
+        | "state_readiness_operator"
+        | "state_readiness_phase_transition"
+        | "state_readiness_enter_review"
+        | "state_readiness_approve"
+        | "state_readiness_add_requirement"
+        | "state_readiness_satisfy_requirement"
+        | "state_readiness_list_requirements"
+        | "state_session_checkpoint_save"
+        | "state_session_checkpoint_restore" => readiness::handle(pool, name, &args).await.unwrap(),
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }
 }
@@ -375,6 +386,7 @@ pub(crate) fn build_tools_list() -> Value {
     arr.extend(evals::tool_descriptors());
     arr.extend(policy::tool_descriptors());
     arr.extend(sessions::tool_descriptors());
+    arr.extend(readiness::tool_descriptors());
     base
 }
 
