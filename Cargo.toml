@@ -1,6 +1,6 @@
 [package]
 name = "spex"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 description = "Spec-driven development CLI for AI agent coordination"
 repository = "https://github.com/johangm90/spex"
@@ -27,7 +27,7 @@ colored = "2"
 dirs = "5"
 include_dir = { version = "0.7", features = ["glob"] }
 inquire = "0.7"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 flate2 = "1"
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
