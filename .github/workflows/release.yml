@@ -41,6 +41,16 @@ jobs:
             archive: tar.gz
             use_cross: true
 
+          # Windows x86_64
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            archive: zip
+
+          # Windows ARM64
+          - target: aarch64-pc-windows-msvc
+            runner: windows-latest
+            archive: zip
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -67,7 +77,8 @@ jobs:
         if: matrix.use_cross == true
         run: cross build --release --target ${{ matrix.target }}
 
-      - name: Package
+      - name: Package (tar.gz — Unix)
+        if: matrix.archive == 'tar.gz'
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME}"
@@ -85,12 +96,37 @@ jobs:
           echo "ARCHIVE=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
           echo "CHECKSUM=${ARCHIVE_NAME}.tar.gz.sha256" >> $GITHUB_ENV
 
+      - name: Package (zip — Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $VERSION = $env:GITHUB_REF_NAME
+          $BINARY  = "spex"
+          $TARGET  = "${{ matrix.target }}"
+          $ARCHIVE_NAME = "${BINARY}-${VERSION}-${TARGET}"
+
+          New-Item -ItemType Directory -Force -Path "dist/${ARCHIVE_NAME}" | Out-Null
+          Copy-Item "target/${TARGET}/release/${BINARY}.exe" "dist/${ARCHIVE_NAME}/"
+          foreach ($f in @("README.md","LICENSE")) {
+            if (Test-Path $f) { Copy-Item $f "dist/${ARCHIVE_NAME}/" }
+          }
+
+          Push-Location dist
+          Compress-Archive -Path "${ARCHIVE_NAME}" -DestinationPath "${ARCHIVE_NAME}.zip"
+          $hash = (Get-FileHash "${ARCHIVE_NAME}.zip" -Algorithm SHA256).Hash.ToLower()
+          "${hash}  ${ARCHIVE_NAME}.zip" | Out-File -Encoding ascii "${ARCHIVE_NAME}.zip.sha256"
+          Pop-Location
+
+          echo "ARCHIVE=${ARCHIVE_NAME}.zip" >> $env:GITHUB_ENV
+          echo "CHECKSUM=${ARCHIVE_NAME}.zip.sha256" >> $env:GITHUB_ENV
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
           path: |
             dist/*.tar.gz
+            dist/*.zip
             dist/*.sha256
 
   release:
@@ -134,6 +170,8 @@ jobs:
           | macOS | Intel | [spex-${VERSION}-x86_64-apple-darwin.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/spex-${VERSION}-x86_64-apple-darwin.tar.gz) |
           | Linux | x86_64 | [spex-${VERSION}-x86_64-unknown-linux-gnu.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/spex-${VERSION}-x86_64-unknown-linux-gnu.tar.gz) |
           | Linux | ARM64 | [spex-${VERSION}-aarch64-unknown-linux-gnu.tar.gz](https://github.com/${{ github.repository }}/releases/download/${VERSION}/spex-${VERSION}-aarch64-unknown-linux-gnu.tar.gz) |
+          | Windows | x86_64 | [spex-${VERSION}-x86_64-pc-windows-msvc.zip](https://github.com/${{ github.repository }}/releases/download/${VERSION}/spex-${VERSION}-x86_64-pc-windows-msvc.zip) |
+          | Windows | ARM64 | [spex-${VERSION}-aarch64-pc-windows-msvc.zip](https://github.com/${{ github.repository }}/releases/download/${VERSION}/spex-${VERSION}-aarch64-pc-windows-msvc.zip) |
 
           ### Verify checksums
           \`\`\`sh
@@ -147,7 +185,9 @@ jobs:
           body_path: release_notes.md
           files: |
             dist/*.tar.gz
+            dist/*.zip
             dist/*.sha256
             install.sh
+            install.ps1
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

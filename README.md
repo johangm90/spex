@@ -36,6 +36,35 @@ For a system-wide install:
 curl -fsSL https://github.com/johangm90/spex/releases/latest/download/install.sh | sh -s -- --prefix /usr/local
 ```
 
+### Windows
+
+```powershell
+iwr -useb https://github.com/johangm90/spex/releases/latest/download/install.ps1 | iex
+```
+
+Installs to `%LOCALAPPDATA%\spex` and adds it to your user `PATH` — no admin required. Supports x86\_64 and ARM64.
+
+To pin a specific version:
+
+```powershell
+$env:SPEX_VERSION = "v0.6.0"
+iwr -useb https://github.com/johangm90/spex/releases/latest/download/install.ps1 | iex
+```
+
+### Self-update
+
+Once installed, keep spex up to date with:
+
+```sh
+spex update
+```
+
+Check for a new version without installing:
+
+```sh
+spex update --check
+```
+
 ### From source
 
 ```sh
@@ -104,6 +133,7 @@ Human approval is enforced by the CLI — no agent can skip it.
 | `spex skill install --all` / `spex skill list` | Install or list bundled agents |
 | `spex memory list ...` / `spex memory search ...` | Inspect agent memory entries |
 | `spex doctor` | Run health checks |
+| `spex update` | Update spex to the latest release (`--check` to only check) |
 
 Run `spex --help` or `spex <command> --help` for the current command surface and flags.
 

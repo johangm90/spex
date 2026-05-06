@@ -12,5 +12,6 @@ pub mod skill_cmd;
 pub mod spec;
 pub mod task;
 pub mod trace;
+pub mod update;
 pub mod util;
 pub mod workspace;

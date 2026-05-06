@@ -47,6 +47,7 @@ use cli::{
     },
     task::{cmd_task_add, cmd_task_done, cmd_task_fail, cmd_task_list, cmd_task_start},
     trace::cmd_trace,
+    update::cmd_update,
     workspace::cmd_workspace_status,
 };
 use sdd::db::open_project_db;
@@ -176,6 +177,13 @@ pub enum Commands {
         /// Shell to generate completions for
         #[arg(value_enum)]
         shell: Shell,
+    },
+
+    /// Update spex to the latest release
+    Update {
+        /// Only check for a newer version without installing
+        #[arg(long)]
+        check: bool,
     },
 
     /// Manage agent memory entries
@@ -1144,6 +1152,10 @@ async fn main() -> Result<()> {
 
         Commands::Completions { shell } => {
             generate(shell, &mut Cli::command(), "spex", &mut std::io::stdout());
+        }
+
+        Commands::Update { check } => {
+            cmd_update(check).await?;
         }
 
         Commands::Memory { cmd } => {
