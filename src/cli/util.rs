@@ -17,7 +17,6 @@ pub fn copilot_config_dir() -> Option<PathBuf> {
 
 /// Returns the shared agents/skills directory: ~/.agents/skills
 /// This path is shared between OpenCode and GitHub Copilot CLI.
-#[allow(dead_code)]
 pub fn agents_skills_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".agents").join("skills"))
 }

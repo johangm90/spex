@@ -106,6 +106,32 @@ pub async fn query_events(
     Ok(events)
 }
 
+pub async fn count_events(
+    pool: &SqlitePool,
+    type_filter: Option<&str>,
+    since: Option<&str>,
+    until: Option<&str>,
+) -> Result<i64> {
+    let mut qb =
+        sqlx::QueryBuilder::<sqlx::Sqlite>::new("SELECT COUNT(*) as cnt FROM events WHERE 1=1");
+
+    if let Some(t) = type_filter {
+        qb.push(" AND type = ");
+        qb.push_bind(t);
+    }
+    if let Some(si) = since {
+        qb.push(" AND timestamp >= ");
+        qb.push_bind(si);
+    }
+    if let Some(u) = until {
+        qb.push(" AND timestamp <= ");
+        qb.push_bind(u);
+    }
+
+    let row: (i64,) = qb.build_query_as().fetch_one(pool).await?;
+    Ok(row.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

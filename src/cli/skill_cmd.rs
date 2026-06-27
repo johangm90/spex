@@ -2,7 +2,8 @@ use anyhow::{anyhow, Result};
 use colored::Colorize;
 
 use crate::host::{Host, HostProfile};
-use crate::skills_mgr::install_bundled_agents;
+use crate::cli::util::agents_skills_dir;
+use crate::skills_mgr::{install_bundled_agents, install_bundled_skills};
 
 /// Resolve a host name string to a `HostProfile`, defaulting to OpenCode.
 fn resolve_host_profile(host: Option<&str>) -> Result<HostProfile> {
@@ -72,6 +73,17 @@ pub async fn cmd_skill_install(all: bool, host: Option<&str>) -> Result<()> {
             "{} {} does not use per-agent files — skipping agent install.",
             "•".dimmed(),
             profile.host.name()
+        );
+    }
+
+    if let Some(skills_dir) = agents_skills_dir() {
+        std::fs::create_dir_all(&skills_dir)?;
+        let skill_count = install_bundled_skills(&skills_dir)?;
+        println!(
+            "{} Installed {} bundled skill(s) to {}",
+            "✓".green(),
+            skill_count,
+            skills_dir.display()
         );
     }
 
@@ -174,6 +186,18 @@ pub async fn cmd_setup(host: Option<&str>) -> Result<()> {
                 host_name
             );
         }
+        println!();
+    }
+
+    if let Some(skills_dir) = agents_skills_dir() {
+        std::fs::create_dir_all(&skills_dir)?;
+        let skill_count = install_bundled_skills(&skills_dir)?;
+        println!(
+            "  {} Installed {} bundled skill(s) → {}",
+            "✓".green(),
+            skill_count,
+            skills_dir.display()
+        );
         println!();
     }
 

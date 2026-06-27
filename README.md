@@ -16,7 +16,7 @@
 
 - **Specs** are the unit of work — named feature slices with a human-gated lifecycle (`draft → approved → in_progress → done`).
 - **Agents** share state through an embedded **MCP (Model Context Protocol)** server backed by a local SQLite database at `.spex/state.db`.
-- **13 bundled AI agent files** install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs them to `~/.config/opencode/agents`. Separately, `skill-builder` scaffolds custom project skills for your team's stack under `~/.agents/skills/<slug>/SKILL.md`.
+- **13 bundled AI agent files** plus workflow skills (e.g. `grilling`) install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs agents to `~/.config/opencode/agents` and bundled skills to `~/.agents/skills/<slug>/SKILL.md`. Separately, `skill-builder` scaffolds custom project skills for your team's stack.
 
 ---
 
@@ -145,7 +145,7 @@ Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 
 | Agent | Mode | Role |
 |-------|------|------|
-| `spex-architect` | primary | Primary engineering copilot — inspects, decides, executes low-risk work directly, and uses SDD workflows for larger changes |
+| `spex-architect` | primary | Primary orchestrator — classifies requests, coordinates specialists, and manages state; never implements directly |
 | `spec-writer` | subagent | Drafts complete spec/slice documents with acceptance criteria and open questions |
 | `task-planner` | subagent | Decomposes approved specs into granular, independently verifiable tasks |
 | `adr-writer` | subagent | Captures architecture decisions in MADR format |

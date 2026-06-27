@@ -3,6 +3,7 @@ use include_dir::{include_dir, Dir};
 use std::path::Path;
 
 static AGENTS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/agents");
+static SKILLS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/skills");
 
 /// Fields in the YAML frontmatter that are OpenCode-specific and should be
 /// stripped when installing for hosts that don't recognise them (e.g. Copilot CLI).
@@ -17,6 +18,49 @@ pub fn install_bundled_agents(target_dir: &Path, extension: &str) -> Result<usiz
     let mut count = 0;
     copy_dir_recursive(&AGENTS_DIR, target_dir, extension, &mut count)?;
     Ok(count)
+}
+
+/// Copy bundled skill directories (`skills/<slug>/SKILL.md`) into the target
+/// skills root (`~/.agents/skills/<slug>/SKILL.md`). Returns the number installed.
+pub fn install_bundled_skills(target_root: &Path) -> Result<usize> {
+    let mut count = 0;
+    for subdir in SKILLS_DIR.dirs() {
+        let slug = subdir
+            .path()
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if slug.is_empty() {
+            continue;
+        }
+
+        let skill_file = subdir.files().find(|f| {
+            f.path()
+                .file_name()
+                .and_then(|s| s.to_str())
+                == Some("SKILL.md")
+        });
+        let Some(skill_file) = skill_file else {
+            continue;
+        };
+
+        let dest_dir = target_root.join(slug);
+        std::fs::create_dir_all(&dest_dir)?;
+        let dest = dest_dir.join("SKILL.md");
+        std::fs::write(&dest, skill_file.contents())?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+/// Returns bundled skill slugs compiled into the binary.
+pub fn bundled_skill_names() -> Vec<String> {
+    let mut names: Vec<String> = SKILLS_DIR
+        .dirs()
+        .filter_map(|d| d.path().file_name().and_then(|s| s.to_str()).map(str::to_string))
+        .collect();
+    names.sort();
+    names
 }
 
 /// Returns the bundled agent file stems compiled into the binary.
@@ -154,6 +198,30 @@ mod tests {
     fn bundled_agent_names_returns_non_empty_list() {
         let names = bundled_agent_names();
         assert!(!names.is_empty(), "must have at least one bundled agent");
+    }
+
+    #[test]
+    fn bundled_skill_names_includes_grilling() {
+        let names = bundled_skill_names();
+        assert!(
+            names.contains(&"grilling".to_string()),
+            "grilling skill must be bundled"
+        );
+    }
+
+    #[test]
+    fn install_bundled_skills_writes_skill_md() {
+        let dir = tempfile::tempdir().unwrap();
+        let count = install_bundled_skills(dir.path()).unwrap();
+        assert!(count > 0, "must install at least one bundled skill");
+
+        let grilling = dir.path().join("grilling").join("SKILL.md");
+        assert!(grilling.exists(), "grilling/SKILL.md must exist");
+        let content = std::fs::read_to_string(&grilling).unwrap();
+        assert!(
+            content.contains("name: grilling"),
+            "grilling skill frontmatter must be present"
+        );
     }
 
     #[test]

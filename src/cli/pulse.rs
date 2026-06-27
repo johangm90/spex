@@ -2,7 +2,11 @@ use anyhow::Result;
 use colored::Colorize;
 use sqlx::SqlitePool;
 
-use crate::sdd::{event::query_events, spec::list_specs, task::list_tasks};
+use crate::sdd::{
+    event::{count_events, query_events},
+    spec::list_specs,
+    task::list_tasks,
+};
 
 use super::util::colorize_status;
 
@@ -77,6 +81,42 @@ pub async fn cmd_pulse(pool: &SqlitePool, since: Option<&str>, until: Option<&st
                 colorize_status(&spec.status),
                 done,
                 total
+            );
+        }
+    }
+
+    // Workflow friction signals
+    let blocked_count = count_events(pool, Some("AgentBlocked"), since, until).await?;
+    let grilling_count = count_events(pool, Some("GrillingResolved"), since, until).await?;
+    println!();
+    println!("  {} Workflow Signals", "◆".bold());
+    println!(
+        "  {} blocked (AgentBlocked)   {} grilling resolved (GrillingResolved)",
+        blocked_count.to_string().yellow(),
+        grilling_count.to_string().green()
+    );
+    if blocked_count > 0 {
+        let recent_blocked = query_events(
+            pool,
+            Some("AgentBlocked"),
+            None,
+            None,
+            Some(3),
+            since,
+            until,
+            None,
+        )
+        .await?;
+        for ev in &recent_blocked {
+            let ts = &ev.timestamp[..16].replace('T', " ");
+            let question = serde_json::from_str::<serde_json::Value>(&ev.payload)
+                .ok()
+                .and_then(|v| v.get("question").and_then(|q| q.as_str()).map(str::to_string))
+                .unwrap_or_else(|| "(no question in payload)".to_string());
+            println!(
+                "    {} {}",
+                ts.dimmed(),
+                question.dimmed()
             );
         }
     }
