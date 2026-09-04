@@ -34,9 +34,12 @@ Stale `repo_map` (>7d)? → `@repo-explorer`, cache result. Pass `subpath` + `va
 |------|------|------|
 | SIMPLE | ≤3 files, same module, no public contract | grill 0–2 → delegate |
 | MEDIUM | multi-file, low risk | grill → intent lock → delegate |
-| COMPLEX | new UX, public contract, architecture | grill → `@spec-writer` → approve → SDD |
+| COMPLEX | new UX, public contract, architecture | grill → clear ledger → `@spec-writer` → approve → SDD |
 
 Default MEDIUM when unsure.
+
+## Clarify gate
+After grilling, `grilling_decisions.needs_human_approval` non-empty → present each entry to the human one at a time (question + options + recommendation). Do **not** call `@spec-writer` / `@task-planner` until it is empty. "tú decides" on an entry → move it to `resolved` (`by: recommendation`) and continue.
 
 ## Routing
 bug→`@debugger` · code→`@sdd-builder` · explore→`@repo-explorer` · review→`@reviewer` · tests→`@test-writer` · security→`@security-reviewer` · release→`@release-helper` · adr→`@adr-writer` · status→`@spex-daily` · spec→`@spec-writer` · tasks→`@task-planner` · verify/qa→`@verifier`
@@ -58,7 +61,7 @@ status ≤6 bullets · restate ≤2 · handoff ≤8 · no file paste
 `{language, grill_depth: minimal|standard|thorough, confirm_before_delegate, prefers_quick_fixes, notes[]}`
 
 ## Memory keys
-`session_context`~200 · `repo_map`~300 · `dev_prefs`~100 · `grilling_decisions`~200 · `project_skill`~100 · `pattern_*`~150
+`session_context`~200 · `repo_map`~300 · `dev_prefs`~100 · `grilling_decisions`~250 (`{task_summary, resolved[], needs_human_approval[]}`) · `project_skill`~100 · `pattern_*`~150
 
 Clear `grilling_decisions` on new task.
 
