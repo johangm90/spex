@@ -25,6 +25,7 @@ Approved spec ID.
 ## Output
 Table only: Task ID | Title | Agent | Inputs | Est.
 Then: `Requirements seeded: <n>`.
+If `.spex/config.toml` has a `[tickets]` backend, tell the orchestrator to run `spex task export <SPEC>` (bash) to mirror tasks to GitHub Issues / `.md` files.
 `BLOCKED areas:` if spec has open questions.
 
 ## Rules

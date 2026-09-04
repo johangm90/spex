@@ -128,6 +128,7 @@ Human approval is enforced by the CLI — no agent can skip it.
 | `spex plan build <ID>` | Interactively add tasks to a spec |
 | `spex analyze <ID>` | Cross-artifact consistency check before implementation (exit 1 on blockers) |
 | `spex task add ...` / `spex task list` | Manage tasks within a spec |
+| `spex task export <SPEC> --to github\|markdown` | Project a spec's tasks to a ticket backend (`[tickets]` in `.spex/config.toml`) |
 | `spex pulse` | Project status dashboard |
 | `spex trace` | Append-only domain event log |
 | `spex mcp serve` / `spex mcp setup` | Start the MCP server or write MCP config |

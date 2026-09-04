@@ -11,6 +11,18 @@ use crate::sdd::db::find_project_root;
 #[derive(Debug, Default)]
 pub struct SpexConfig {
     pub webhooks: Option<WebhookConfig>,
+    pub tickets: Option<TicketsConfig>,
+}
+
+/// Configuration for the pluggable ticket backend (`spex task export`).
+#[derive(Debug, Clone)]
+pub struct TicketsConfig {
+    /// `spex-state` (default), `github`, or `markdown`.
+    pub backend: String,
+    /// `owner/name` for the GitHub backend; `gh` infers from the cwd remote when absent.
+    pub github_repo: Option<String>,
+    /// Output directory for the Markdown backend (default `.spex/tasks`).
+    pub markdown_dir: Option<String>,
 }
 
 /// Configuration for the outbound webhook integration.
@@ -29,6 +41,7 @@ pub struct WebhookConfig {
 #[derive(Deserialize, Default)]
 struct RawConfig {
     webhooks: Option<RawWebhookConfig>,
+    tickets: Option<RawTicketsConfig>,
 }
 
 #[derive(Deserialize)]
@@ -36,6 +49,13 @@ struct RawWebhookConfig {
     url: String,
     events: Option<Vec<String>>,
     timeout_secs: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct RawTicketsConfig {
+    backend: Option<String>,
+    github_repo: Option<String>,
+    markdown_dir: Option<String>,
 }
 
 // ─── Default event list ───────────────────────────────────────────────────────
@@ -75,7 +95,13 @@ impl SpexConfig {
             timeout_secs: w.timeout_secs.unwrap_or(5),
         });
 
-        Ok(SpexConfig { webhooks })
+        let tickets = raw.tickets.map(|t| TicketsConfig {
+            backend: t.backend.unwrap_or_else(|| "spex-state".to_string()),
+            github_repo: t.github_repo,
+            markdown_dir: t.markdown_dir,
+        });
+
+        Ok(SpexConfig { webhooks, tickets })
     }
 }
 

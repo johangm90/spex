@@ -6,6 +6,7 @@ mod mcp;
 mod scaffold;
 mod sdd;
 mod skills_mgr;
+mod tickets;
 pub mod webhooks;
 
 use anyhow::Result;
@@ -46,7 +47,9 @@ use cli::{
     spec::{
         cmd_spec_add, cmd_spec_approve, cmd_spec_done, cmd_spec_list, cmd_spec_show, cmd_spec_start,
     },
-    task::{cmd_task_add, cmd_task_done, cmd_task_fail, cmd_task_list, cmd_task_start},
+    task::{
+        cmd_task_add, cmd_task_done, cmd_task_export, cmd_task_fail, cmd_task_list, cmd_task_start,
+    },
     trace::cmd_trace,
     update::cmd_update,
     workspace::cmd_workspace_status,
@@ -291,6 +294,17 @@ pub enum TaskCmd {
     },
     /// Mark task as failed
     Fail { id: String },
+    /// Export a spec's tasks to an external ticket backend
+    Export {
+        /// Spec whose tasks to export
+        spec_id: String,
+        /// Backend: spex-state | github | markdown (overrides .spex/config.toml)
+        #[arg(long = "to")]
+        to: Option<String>,
+        /// Show what would be exported without writing anything
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// List tasks
     List {
         spec_id: Option<String>,
@@ -876,6 +890,11 @@ async fn main() -> Result<()> {
                 }
                 TaskCmd::Done { id, updated_by } => cmd_task_done(&pool, &id, &updated_by).await?,
                 TaskCmd::Fail { id } => cmd_task_fail(&pool, &id).await?,
+                TaskCmd::Export {
+                    spec_id,
+                    to,
+                    dry_run,
+                } => cmd_task_export(&pool, &spec_id, to.as_deref(), dry_run).await?,
                 TaskCmd::List {
                     spec_id,
                     json,
