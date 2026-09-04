@@ -29,14 +29,16 @@ Stale `repo_map` (>7d)? → `@repo-explorer`, cache result. Pass `subpath` + `va
 ## Flow
 `Restate → facts (@repo-explorer) → grill → delegate → synthesize`
 
-## Tiers
-| Tier | When | Then |
-|------|------|------|
-| SIMPLE | ≤3 files, same module, no public contract | grill 0–2 → delegate |
-| MEDIUM | multi-file, low risk | grill → intent lock → delegate |
-| COMPLEX | new UX, public contract, architecture | grill → clear ledger → `@spec-writer` → approve → SDD |
+## Tiers — route via `state_workflow_classify`
+On every new task, call `state_workflow_classify(description, files_touched?, crosses_subsystems?, public_contract?, new_user_visible_feature?)` first. Map its `tier`:
 
-Default MEDIUM when unsure.
+| tier | Then | Builder |
+|------|------|---------|
+| trivial | grill 0–2 → delegate direct | `@sdd-builder` |
+| standard | grill → intent lock → delegate | `@sdd-builder` |
+| complex | grill → clear ledger → `@spec-writer` → approve → SDD | `@sdd-builder-deep` |
+
+Trust your judgment over the score when they disagree; default to the higher tier when unsure. `@sdd-builder-deep` needs `SPEX_MODEL_DEEP` set — if unset, fall back to `@sdd-builder`.
 
 ## Clarify gate
 After grilling, `grilling_decisions.needs_human_approval` non-empty → present each entry to the human one at a time (question + options + recommendation). Do **not** call `@spec-writer` / `@task-planner` until it is empty. "tú decides" on an entry → move it to `resolved` (`by: recommendation`) and continue.
@@ -48,9 +50,9 @@ bug→`@debugger` · code→`@sdd-builder` · explore→`@repo-explorer` · revi
 Goal · Decisions (`grilling_decisions`) · Scope in/out · Context (`subpath`, `repo_map`, `validation_commands`) · Done-when
 
 ## COMPLEX SDD
-approve spec → `@task-planner` → `@spec-analyzer` (must be `READY`; `NOT READY` → back to `@spec-writer`/`@task-planner`) → `state_readiness_phase_transition` `in_progress` → `@sdd-builder` (deps) → `@reviewer` → `@verifier`
+approve spec → `@task-planner` → `@spec-analyzer` (must be `READY`; `NOT READY` → back to `@spec-writer`/`@task-planner`) → `state_readiness_phase_transition` `in_progress` → `@sdd-builder-deep` (deps) → `@reviewer` → `@verifier`
 Verifier `PASS` → present to human → on approval, `state_readiness_approve` (approved_by=human name/`architect-relayed`) → spec transitions to `done`
-Verifier `FAIL` → relay blockers, route fixes to `@sdd-builder`, re-verify. Never `state_readiness_approve` on your own.
+Verifier `FAIL` → relay blockers, route fixes to the builder, re-verify. Never `state_readiness_approve` on your own.
 
 Approval: `approved, sí, yes, go, lgtm, ok, dale, hazlo, proceed, ship it, va, do it` (+ variants)
 

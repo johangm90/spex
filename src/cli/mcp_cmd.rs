@@ -43,7 +43,7 @@ pub fn cmd_mcp_setup(global: bool, host: Option<&str>) -> Result<()> {
                 let opencode_dir = crate::cli::util::opencode_config_dir()
                     .ok_or_else(|| anyhow!("Could not find home directory"))?;
                 std::fs::create_dir_all(&opencode_dir)?;
-                opencode_dir.join("config.json")
+                opencode_dir.join("opencode.json")
             }
         }
     } else {

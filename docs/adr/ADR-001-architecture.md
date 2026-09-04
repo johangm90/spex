@@ -74,7 +74,7 @@ The current schema comprises five working tables: `specs`, `tasks`, `events`, `m
 
 OpenCode's MCP client natively supports the stdio transport. Launching `spex mcp serve` as a child process avoids port-allocation conflicts, removes the need for TLS or authentication, and keeps the tool stateless between MCP sessions (state lives in SQLite, not in process memory).
 
-The MCP server dispatches a canonical tool set for snapshot, project-context bootstrap, spec, task, event, memory, artifact, policy, evidence, readiness, sessions, evals, and PRD access. The current source exposes 48 canonical tools split across `state_*`, `memory_*`, and `policy_*` names in `build_tools_list()`, and this document should treat that source as authoritative for tool counts and names.
+The MCP server dispatches a canonical tool set for snapshot, project-context bootstrap, spec, task, event, memory, artifact, policy, evidence, readiness, sessions, evals, and PRD access. The current source exposes 49 canonical tools split across `state_*`, `memory_*`, and `policy_*` names in `build_tools_list()`, and this document should treat that source as authoritative for tool counts and names.
 
 #### Consequences
 
@@ -101,7 +101,7 @@ The MCP server dispatches a canonical tool set for snapshot, project-context boo
 
 **`include_dir!` macro** (from the `include_dir` crate), evaluated at compile time.
 
-15 bundled agent markdown files from `agents/` are embedded directly into the `spex` binary. `build.rs` watches `agents/` for rebuilds, and the current installer writes bundled files to `~/.config/opencode/agents/` when the user runs `spex setup` or `spex skill install --all`.
+16 bundled agent markdown files from `agents/` are embedded directly into the `spex` binary. `build.rs` watches `agents/` for rebuilds, and the current installer writes bundled files to `~/.config/opencode/agents/` when the user runs `spex setup` or `spex skill install --all`.
 
 #### Consequences
 
@@ -208,7 +208,7 @@ Status values are stored in the `specs.status` column, and transitions are valid
 
 #### Decision Outcome
 
-The current implementation exposes 48 canonical MCP tools:
+The current implementation exposes 49 canonical MCP tools:
 
 - `state_*` tools for snapshot, project bootstrap, spec, task, event, artifact, PRD, evals, sessions, and readiness/workflow-phase operations
 - `memory_*` tools for memory storage, search, deletion, statistics, garbage collection, and relationship lookup

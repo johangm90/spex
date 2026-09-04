@@ -66,7 +66,7 @@ impl HostProfile {
                 host: Host::OpenCode,
                 agents_dir: Some(home.join(".config").join("opencode").join("agents")),
                 agent_extension: Some("md"),
-                mcp_config_path: Some(home.join(".config").join("opencode").join("config.json")),
+                mcp_config_path: Some(home.join(".config").join("opencode").join("opencode.json")),
                 mcp_servers_key: "mcp",
                 mcp_command_is_array: true,
                 supports_mcp: true,
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(profile.agent_extension, Some("md"));
         assert_eq!(
             profile.mcp_config_path,
-            Some(home.join(".config").join("opencode").join("config.json"))
+            Some(home.join(".config").join("opencode").join("opencode.json"))
         );
         assert_eq!(profile.mcp_servers_key, "mcp");
         assert!(profile.mcp_command_is_array);

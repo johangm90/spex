@@ -1,5 +1,6 @@
 pub mod analyze;
 pub mod artifact;
+pub mod classify;
 pub mod db;
 pub mod evals;
 pub mod event;

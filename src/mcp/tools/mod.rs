@@ -16,6 +16,7 @@ pub async fn dispatch_tool(pool: &SqlitePool, name: &str, args: Value) -> Result
     match name {
         "state_snapshot" => project::handle_snapshot(pool, args).await,
         "state_project_context" => project::handle_project_context(pool, args).await,
+        "state_workflow_classify" => project::handle_classify(pool, args).await,
         "state_slice_get" => lifecycle::handle_slice_get(pool, args).await,
         "state_slice_create" => lifecycle::handle_slice_create(pool, args).await,
         "state_slice_update" => lifecycle::handle_slice_update(pool, args).await,
@@ -102,6 +103,21 @@ fn build_static_tools_list() -> Value {
                         "description": "Optional subdirectory inside the project root to inspect as a specific subproject."
                     }
                 }
+            }
+        },
+        {
+            "name": "state_workflow_classify",
+            "description": "Heuristically classify a task into a workflow tier (trivial | standard | complex) so the orchestrator can route it. No LLM call. Explicit signal flags dominate; the description is only sniffed for keywords when a flag is absent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string", "description": "The task request in the user's words"},
+                    "files_touched": {"type": "integer", "description": "Estimated number of files the change touches"},
+                    "crosses_subsystems": {"type": "boolean", "description": "True if the change spans multiple subsystems (e.g. CLI + domain + MCP)"},
+                    "public_contract": {"type": "boolean", "description": "True if the change alters a public contract (API, SQL schema, MCP tool, CLI command)"},
+                    "new_user_visible_feature": {"type": "boolean", "description": "True if this introduces new user-visible behaviour"}
+                },
+                "required": ["description"]
             }
         },
         {

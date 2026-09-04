@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::sdd::{
     artifact::query_artifacts,
+    classify::{classify, ClassifyInput},
     event::query_events,
     memory::memory_stats,
     project_profile::{bootstrap_project_context, inspect_project_at_subpath},
@@ -12,7 +13,7 @@ use crate::sdd::{
     task::list_tasks,
 };
 
-use super::args::optional_str;
+use super::args::{optional_bool, optional_i64, optional_str, required_str};
 
 pub(super) async fn handle_snapshot(pool: &SqlitePool, args: Value) -> Result<Value> {
     let specs = list_specs(pool, None, None).await?;
@@ -142,6 +143,22 @@ pub(super) async fn handle_prd_set(_pool: &SqlitePool, args: Value) -> Result<Va
     Ok(json!({
         "ok": true,
         "path": prd_path.display().to_string(),
+    }))
+}
+
+pub(super) async fn handle_classify(_pool: &SqlitePool, args: Value) -> Result<Value> {
+    let description = required_str(&args, "description")?;
+    let c = classify(&ClassifyInput {
+        description,
+        files_touched: optional_i64(&args, "files_touched"),
+        crosses_subsystems: optional_bool(&args, "crosses_subsystems"),
+        public_contract: optional_bool(&args, "public_contract"),
+        new_user_visible_feature: optional_bool(&args, "new_user_visible_feature"),
+    });
+    Ok(json!({
+        "tier": c.tier,
+        "score": c.score,
+        "rationale": c.rationale,
     }))
 }
 

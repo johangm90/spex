@@ -16,7 +16,7 @@
 
 - **Specs** are the unit of work — named feature slices with a human-gated lifecycle (`draft → approved → in_progress → done`).
 - **Agents** share state through an embedded **MCP (Model Context Protocol)** server backed by a local SQLite database at `.spex/state.db`.
-- **15 bundled AI agent files** plus workflow skills (e.g. `grilling`) install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs agents to `~/.config/opencode/agents` and bundled skills to `~/.agents/skills/<slug>/SKILL.md`. Separately, `skill-builder` scaffolds custom project skills for your team's stack.
+- **16 bundled AI agent files** plus workflow skills (e.g. `grilling`) install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs agents to `~/.config/opencode/agents` and bundled skills to `~/.agents/skills/<slug>/SKILL.md`. Separately, `skill-builder` scaffolds custom project skills for your team's stack.
 
 ---
 
@@ -153,6 +153,7 @@ Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 | `spec-analyzer` | subagent | Consistency gate — runs `spex analyze`, flags AC/task gaps and unresolved decisions before implementation |
 | `adr-writer` | subagent | Captures architecture decisions in MADR format |
 | `sdd-builder` | subagent | Implements tasks from approved specs, runs tests, and marks tasks done |
+| `sdd-builder-deep` | subagent | `sdd-builder` on the reasoning-model tier — the router picks it for complex tasks (`SPEX_MODEL_DEEP`) |
 | `skill-builder` | subagent | Scaffolds custom spex-compatible agents for any team's tech stack |
 | `repo-explorer` | subagent | Maps the repo quickly and summarizes relevant files, flows, and conventions |
 | `debugger` | subagent | Investigates failures, isolates root causes, and applies or recommends minimal fixes |
@@ -163,6 +164,39 @@ Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 | `security-reviewer` | subagent | Reviews code for auth, secret, input, and permission risks |
 
 > **Need a specialist?** Ask `@spex-architect` to invoke `@skill-builder` and describe your stack. You'll get a custom agent tailored to your conventions in seconds.
+
+---
+
+## Workflow phases
+
+`spex-architect` drives an explicit pipeline for non-trivial work:
+
+```
+Brief/Constitution → Clarify → Specify → Plan → Tasks → Analyze → Implement → Verify
+```
+
+- **Clarify** (`grilling` skill) records decisions as `resolved` vs. `needs_human_approval`; drafting is gated until the ledger clears.
+- **Analyze** — `spex analyze <SPEC>` is a deterministic check (AC↔task coverage, unresolved decisions, ambiguity, dependency readiness); `@spec-analyzer` wraps it with judgment.
+- **Verify** — `@verifier` runs `validation_commands.full`, maps every AC to evidence, and satisfies the readiness requirements `@task-planner` seeded. Only a human's approval, relayed by `@spex-architect` via `state_readiness_approve`, closes the spec.
+
+## Model tiers (complexity router)
+
+`@spex-architect` calls the `state_workflow_classify` MCP tool on each task and routes by tier:
+
+| Tier | Flow | Builder |
+|------|------|---------|
+| `trivial` | act directly, no spec | `@sdd-builder` |
+| `standard` | grill → delegate | `@sdd-builder` |
+| `complex` | full spec → analyze → SDD | `@sdd-builder-deep` |
+
+Set model tiers in your host (env vars, consumed by agent frontmatter):
+
+```sh
+export SPEX_MODEL_FAST=…       # repo-explorer, spex-daily
+export SPEX_MODEL_BUILD=…      # sdd-builder, verifier, test-writer, debugger
+export SPEX_MODEL_REASONING=…  # spex-architect, spec-writer, spec-analyzer
+export SPEX_MODEL_DEEP=…       # sdd-builder-deep (unset → router falls back to sdd-builder)
+```
 
 ---
 
