@@ -54,6 +54,7 @@ pub fn install_bundled_skills(target_root: &Path) -> Result<usize> {
 }
 
 /// Returns bundled skill slugs compiled into the binary.
+#[cfg(test)]
 pub fn bundled_skill_names() -> Vec<String> {
     let mut names: Vec<String> = SKILLS_DIR
         .dirs()
