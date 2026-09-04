@@ -1,3 +1,4 @@
+pub mod analyze;
 pub mod artifact;
 pub mod db;
 pub mod evals;

@@ -16,7 +16,7 @@
 
 - **Specs** are the unit of work — named feature slices with a human-gated lifecycle (`draft → approved → in_progress → done`).
 - **Agents** share state through an embedded **MCP (Model Context Protocol)** server backed by a local SQLite database at `.spex/state.db`.
-- **14 bundled AI agent files** plus workflow skills (e.g. `grilling`) install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs agents to `~/.config/opencode/agents` and bundled skills to `~/.agents/skills/<slug>/SKILL.md`. Separately, `skill-builder` scaffolds custom project skills for your team's stack.
+- **15 bundled AI agent files** plus workflow skills (e.g. `grilling`) install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs agents to `~/.config/opencode/agents` and bundled skills to `~/.agents/skills/<slug>/SKILL.md`. Separately, `skill-builder` scaffolds custom project skills for your team's stack.
 
 ---
 
@@ -126,6 +126,7 @@ Human approval is enforced by the CLI — no agent can skip it.
 | `spex spec list` | List all specs |
 | `spex spec show <ID>` | Show spec details and tasks |
 | `spex plan build <ID>` | Interactively add tasks to a spec |
+| `spex analyze <ID>` | Cross-artifact consistency check before implementation (exit 1 on blockers) |
 | `spex task add ...` / `spex task list` | Manage tasks within a spec |
 | `spex pulse` | Project status dashboard |
 | `spex trace` | Append-only domain event log |
@@ -148,6 +149,7 @@ Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 | `spex-architect` | primary | Primary orchestrator — classifies requests, coordinates specialists, and manages state; never implements directly |
 | `spec-writer` | subagent | Drafts complete spec/slice documents with acceptance criteria and open questions |
 | `task-planner` | subagent | Decomposes approved specs into granular, independently verifiable tasks |
+| `spec-analyzer` | subagent | Consistency gate — runs `spex analyze`, flags AC/task gaps and unresolved decisions before implementation |
 | `adr-writer` | subagent | Captures architecture decisions in MADR format |
 | `sdd-builder` | subagent | Implements tasks from approved specs, runs tests, and marks tasks done |
 | `skill-builder` | subagent | Scaffolds custom spex-compatible agents for any team's tech stack |

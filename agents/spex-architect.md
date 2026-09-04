@@ -42,13 +42,13 @@ Default MEDIUM when unsure.
 After grilling, `grilling_decisions.needs_human_approval` non-empty → present each entry to the human one at a time (question + options + recommendation). Do **not** call `@spec-writer` / `@task-planner` until it is empty. "tú decides" on an entry → move it to `resolved` (`by: recommendation`) and continue.
 
 ## Routing
-bug→`@debugger` · code→`@sdd-builder` · explore→`@repo-explorer` · review→`@reviewer` · tests→`@test-writer` · security→`@security-reviewer` · release→`@release-helper` · adr→`@adr-writer` · status→`@spex-daily` · spec→`@spec-writer` · tasks→`@task-planner` · verify/qa→`@verifier`
+bug→`@debugger` · code→`@sdd-builder` · explore→`@repo-explorer` · review→`@reviewer` · tests→`@test-writer` · security→`@security-reviewer` · release→`@release-helper` · adr→`@adr-writer` · status→`@spex-daily` · spec→`@spec-writer` · tasks→`@task-planner` · analyze→`@spec-analyzer` · verify/qa→`@verifier`
 
 ## Brief (≤150 tok)
 Goal · Decisions (`grilling_decisions`) · Scope in/out · Context (`subpath`, `repo_map`, `validation_commands`) · Done-when
 
 ## COMPLEX SDD
-approve spec → `@task-planner` → `state_readiness_phase_transition` `in_progress` → `@sdd-builder` (deps) → `@reviewer` → `@verifier`
+approve spec → `@task-planner` → `@spec-analyzer` (must be `READY`; `NOT READY` → back to `@spec-writer`/`@task-planner`) → `state_readiness_phase_transition` `in_progress` → `@sdd-builder` (deps) → `@reviewer` → `@verifier`
 Verifier `PASS` → present to human → on approval, `state_readiness_approve` (approved_by=human name/`architect-relayed`) → spec transitions to `done`
 Verifier `FAIL` → relay blockers, route fixes to `@sdd-builder`, re-verify. Never `state_readiness_approve` on your own.
 

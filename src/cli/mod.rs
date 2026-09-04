@@ -1,3 +1,4 @@
+pub mod analyze;
 pub mod brief;
 pub mod doctor;
 pub mod eval;

@@ -101,7 +101,7 @@ The MCP server dispatches a canonical tool set for snapshot, project-context boo
 
 **`include_dir!` macro** (from the `include_dir` crate), evaluated at compile time.
 
-14 bundled agent markdown files from `agents/` are embedded directly into the `spex` binary. `build.rs` watches `agents/` for rebuilds, and the current installer writes bundled files to `~/.config/opencode/agents/` when the user runs `spex setup` or `spex skill install --all`.
+15 bundled agent markdown files from `agents/` are embedded directly into the `spex` binary. `build.rs` watches `agents/` for rebuilds, and the current installer writes bundled files to `~/.config/opencode/agents/` when the user runs `spex setup` or `spex skill install --all`.
 
 #### Consequences
 

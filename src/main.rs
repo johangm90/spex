@@ -13,6 +13,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 
 use cli::{
+    analyze::cmd_analyze,
     brief::cmd_brief,
     doctor::cmd_doctor,
     eval::{
@@ -130,6 +131,15 @@ pub enum Commands {
     /// Print a compact project brief for AI session kickoff
     Brief {
         /// Output as JSON instead of markdown
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Analyze a spec for cross-artifact consistency before implementation
+    Analyze {
+        /// Spec ID to analyze (e.g. SPEC-001)
+        spec_id: String,
+        /// Output as JSON instead of a human report
         #[arg(long)]
         json: bool,
     },
@@ -1108,6 +1118,14 @@ async fn main() -> Result<()> {
         Commands::Brief { json } => {
             let pool = open_project_db().await?;
             cmd_brief(&pool, json).await?;
+        }
+
+        Commands::Analyze { spec_id, json } => {
+            let pool = open_project_db().await?;
+            let blocking = cmd_analyze(&pool, &spec_id, json).await?;
+            if blocking {
+                std::process::exit(1);
+            }
         }
 
         Commands::Trace {

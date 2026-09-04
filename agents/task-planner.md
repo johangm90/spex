@@ -16,7 +16,7 @@ Approved spec ID.
 
 ## Process
 1. `state_slice_get` (approved) · `memory_get spec_*` · `memory_get patterns` · `state_task_get` (no dupes)
-2. Create tasks: 1–4h each, verifiable, prefix `[SCHEMA|API|UI|TEST|INFRA|DOCS]`
+2. Create tasks: 1–4h each, verifiable, prefix `[SCHEMA|API|UI|TEST|INFRA|DOCS]`, and cite the AC(s) each task delivers as `(AC-N)` / `(AC-N,AC-M)` in the title — every AC must be cited by ≥1 task
 3. Agent: `sdd-builder` (default), `adr-writer` for DOCS/ADR
 4. `state_task_create` each · update patterns ≤300 tok · `TasksPlanned` event
 5. `state_readiness_phase_transition` → `planning` (entered_by=`task-planner`)

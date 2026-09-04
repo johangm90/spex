@@ -11,7 +11,7 @@
 
 Spex is a **Spec-Driven Development (SDD) CLI** that gives a team of autonomous AI coding agents a shared, persistent, structured picture of what needs to be built, who is building it, and what the current state of the work is.
 
-The problem it solves: when multiple LLM-based agents collaborate on a software project, there is no authoritative shared state — each session starts blind, agents duplicate work, and the human developer loses traceability. Spex provides that shared brain: a single Rust binary that runs a local MCP server, persists project state in SQLite, bundles 14 agent definition files, and enforces a human-gated spec lifecycle.
+The problem it solves: when multiple LLM-based agents collaborate on a software project, there is no authoritative shared state — each session starts blind, agents duplicate work, and the human developer loses traceability. Spex provides that shared brain: a single Rust binary that runs a local MCP server, persists project state in SQLite, bundles 15 agent definition files, and enforces a human-gated spec lifecycle.
 
 **Who benefits:**
 - Developers using AI-assisted coding (primarily OpenCode users) who want structured, traceable, multi-agent workflows from the terminal.
@@ -25,7 +25,7 @@ The problem it solves: when multiple LLM-based agents collaborate on a software 
 
 2. **Human remains the gate** — Every spec must pass through human approval (`draft → approved`) before any agent executes work, and the CLI enforces the state machine transitions — no agent can skip stages.
 
-3. **One binary, works anywhere** — `spex` is a self-contained Rust binary: it embeds 14 bundled agent markdown files, bundles the MCP server, includes migrations, and installs via a single shell command. No Node.js, no Python, no Docker required.
+3. **One binary, works anywhere** — `spex` is a self-contained Rust binary: it embeds 15 bundled agent markdown files, bundles the MCP server, includes migrations, and installs via a single shell command. No Node.js, no Python, no Docker required.
 
 ---
 
@@ -65,7 +65,7 @@ A developer building or running multi-agent pipelines with one orchestrator and 
 | **Date/time** | `chrono` 0.4 with serde | RFC3339 timestamps throughout |
 | **Error handling** | `anyhow` + `thiserror` | Propagate up to CLI boundary; display user-friendly messages |
 | **Terminal UI** | `colored` + `inquire` | Color output; interactive prompts for `plan build` |
-| **Asset embedding** | `include_dir` | 14 bundled agent markdown files from `agents/` compiled into the binary |
+| **Asset embedding** | `include_dir` | 15 bundled agent markdown files from `agents/` compiled into the binary |
 | **Platform dirs** | `dirs` | Resolve `~/.config/opencode/` cross-platform |
 | **MCP transport** | JSON-RPC 2.0 over stdio | No HTTP server; OpenCode spawns `spex mcp serve` as subprocess |
 | **CI/CD** | GitHub Actions | `ci.yml` (test + build), `release.yml` (cross-compile + publish) |
@@ -115,7 +115,7 @@ The central feature. `spec add`, `spec approve`, `spec start`, `spec done` with 
 The agent-facing API. JSON-RPC 2.0 over stdio. 48 canonical tools covering specs, tasks, events, memory, artifacts, project-context bootstrap, policy, evidence, readiness, sessions, evals, and PRD reading/writing. Started via `spex mcp serve`.
 
 ### Skills & Agent Bundle
-14 bundled agent markdown files embedded from `agents/` at compile time. Installed to `~/.config/opencode/agents/` via `spex setup` or `spex skill install --all`. Separately, custom project skills are generated as `SKILL.md` files under `~/.agents/skills/<slug>/`.
+15 bundled agent markdown files embedded from `agents/` at compile time. Installed to `~/.config/opencode/agents/` via `spex setup` or `spex skill install --all`. Separately, custom project skills are generated as `SKILL.md` files under `~/.agents/skills/<slug>/`.
 
 Bundled execution-oriented agents should prefer `validation_commands.fast`, `primary`, and `full` from project context instead of guessing repository verification commands.
 
