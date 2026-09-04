@@ -19,9 +19,12 @@ Approved spec ID.
 2. Create tasks: 1–4h each, verifiable, prefix `[SCHEMA|API|UI|TEST|INFRA|DOCS]`
 3. Agent: `sdd-builder` (default), `adr-writer` for DOCS/ADR
 4. `state_task_create` each · update patterns ≤300 tok · `TasksPlanned` event
+5. `state_readiness_phase_transition` → `planning` (entered_by=`task-planner`)
+6. Seed review requirements via `state_readiness_add_requirement`: `test_pass`, `lint_pass`, `review_approved`, plus one `custom` per AC not covered by a `[TEST]` task
 
 ## Output
 Table only: Task ID | Title | Agent | Inputs | Est.
+Then: `Requirements seeded: <n>`.
 `BLOCKED areas:` if spec has open questions.
 
 ## Rules

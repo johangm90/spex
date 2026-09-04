@@ -16,7 +16,7 @@
 
 - **Specs** are the unit of work — named feature slices with a human-gated lifecycle (`draft → approved → in_progress → done`).
 - **Agents** share state through an embedded **MCP (Model Context Protocol)** server backed by a local SQLite database at `.spex/state.db`.
-- **13 bundled AI agent files** plus workflow skills (e.g. `grilling`) install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs agents to `~/.config/opencode/agents` and bundled skills to `~/.agents/skills/<slug>/SKILL.md`. Separately, `skill-builder` scaffolds custom project skills for your team's stack.
+- **14 bundled AI agent files** plus workflow skills (e.g. `grilling`) install in one command and work with [OpenCode](https://opencode.ai) out of the box. `spex setup` installs agents to `~/.config/opencode/agents` and bundled skills to `~/.agents/skills/<slug>/SKILL.md`. Separately, `skill-builder` scaffolds custom project skills for your team's stack.
 
 ---
 
@@ -154,6 +154,7 @@ Install once with `spex setup`, then use from [OpenCode](https://opencode.ai):
 | `repo-explorer` | subagent | Maps the repo quickly and summarizes relevant files, flows, and conventions |
 | `debugger` | subagent | Investigates failures, isolates root causes, and applies or recommends minimal fixes |
 | `reviewer` | subagent | Reviews code for bugs, regressions, risks, and missing tests |
+| `verifier` | subagent | QA gate — runs full validation, maps ACs to evidence, satisfies review requirements; never approves |
 | `test-writer` | subagent | Adds or updates focused tests for new behavior, bug fixes, and regressions |
 | `release-helper` | subagent | Prepares release readiness checks, PR summaries, and release notes |
 | `security-reviewer` | subagent | Reviews code for auth, secret, input, and permission risks |
